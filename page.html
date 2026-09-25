@@ -1,0 +1,2972 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pocket">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161514" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<title>Pocket</title>
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --surface: #ffffff;
+    --ink: #1c1b19;
+    --muted: #75716a;
+    --faint: #a8a39a;
+    --line: #e6e3dc;
+    --mine: #e9e6de;
+    --accent: #1c1b19;
+    --on-accent: #ffffff;
+    --red: #cf3f36;
+    --amber: #c98200;
+    --blue: #2f68e8;
+    --green: #1f9a5c;
+    --code: #efece5;
+    --tap: rgba(0,0,0,.05);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161514;
+      --surface: #1f1e1c;
+      --ink: #eeebe5;
+      --muted: #9a958c;
+      --faint: #6d695f;
+      --line: #2e2c29;
+      --mine: #2b2926;
+      --accent: #eeebe5;
+      --on-accent: #161514;
+      --blue: #6f9dff; /* lighter in dark mode: #2f68e8 read as navy on #161514 */
+      --code: #262421;
+      --tap: rgba(255,255,255,.06);
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+  }
+  button, textarea, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--blue); }
+  svg { display: block; }
+  .view { max-width: 680px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+
+  /* ---------- Home ---------- */
+  .home { padding: calc(var(--safe-t) + 20px) 0 calc(var(--safe-b) + 130px); }
+  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 6px 20px; }
+  .masthead h1 { font-size: 30px; line-height: 1.1; letter-spacing: -0.02em; margin: 0; font-weight: 700; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 999px; padding: 8px 14px 8px 12px; font-size: 15px; font-weight: 600;
+  }
+  .pill svg { width: 18px; height: 18px; }
+  .summary { padding: 0 20px 10px; color: var(--muted); font-size: 15px; }
+  .summary .offline { color: var(--red); }
+  h2.section {
+    font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 18px 20px 6px;
+  }
+  .hint { margin: 2px 20px 4px; font-size: 13px; color: var(--faint); }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { position: relative; overflow: hidden; }
+  .row {
+    position: relative; z-index: 1; display: grid; grid-template-columns: 14px 1fr; gap: 10px;
+    padding: 12px 20px; text-decoration: none; color: inherit; background: var(--bg);
+    touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+  }
+  .row.settle { transition: transform .22s ease; }
+  .row:active { background: color-mix(in srgb, var(--bg) 94%, var(--ink)); }
+  /* swipe backgrounds */
+  .act {
+    position: absolute; inset: 0; display: none; align-items: center; padding: 0 24px;
+    font-weight: 700; font-size: 15px; color: #fff;
+  }
+  .act.read { background: var(--blue); justify-content: flex-end; }
+  .act.pin { background: var(--amber); justify-content: flex-start; }
+  li[data-dir="left"] .act.read, li[data-dir="right"] .act.pin { display: flex; }
+  .act .s2 { display: none; }
+  li.far .act.read { background: #7a756c; }
+  li.far .act .s1 { display: none; }
+  li.far .act .s2 { display: inline; }
+  li.leaving { transition: height .22s ease, opacity .22s ease; overflow: hidden; opacity: 0; }
+  li:not(.armed) .act { opacity: .55; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 8px; background: transparent; }
+  .dot.error { background: var(--red); }
+  .dot.question { background: var(--amber); }
+  .dot.reply { background: var(--blue); }
+  .dot.working { background: var(--green); animation: pulse 1.4s ease-in-out infinite; }
+  .dot.idle { border: 1.5px solid var(--line); }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .row .title {
+    font-weight: 600; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .row.quiet .title { font-weight: 500; }
+  .row .preview {
+    color: var(--muted); font-size: 15px; margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .row .meta { color: var(--faint); font-size: 13px; margin-top: 3px; }
+  .row .why { color: var(--amber); font-weight: 600; }
+  .row .why.error { color: var(--red); }
+  .row .why.unread { color: var(--blue); }
+  .tag.mgrtag { background: color-mix(in srgb, var(--blue) 22%, var(--mine)); color: var(--ink); }
+  .tag.mgrtag svg { display: inline-block; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 5px; background: var(--mine); color: var(--muted); margin-right: 4px; vertical-align: 1px;
+  }
+  .empty { padding: 6px 20px 4px 44px; color: var(--muted); font-size: 15px; }
+  .more {
+    display: block; margin: 4px 20px; padding: 10px 0; border: 0; background: none;
+    color: var(--muted); font-size: 15px;
+  }
+
+  /* Dock */
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    padding: 10px 24px calc(var(--safe-b) + 14px); max-width: 680px; margin: 0 auto;
+    background: linear-gradient(transparent, var(--bg) 38%);
+  }
+  .dock-side {
+    justify-self: center; border: 0; background: none; display: grid; justify-items: center; gap: 3px;
+    color: var(--muted); font-size: 12px; font-weight: 600; position: relative; padding: 6px 10px;
+  }
+  .dock-side svg { width: 26px; height: 26px; color: var(--ink); }
+  .badge {
+    position: absolute; top: 0; right: 4px; min-width: 18px; height: 18px; border-radius: 9px; padding: 0 5px;
+    background: var(--blue); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+  .mic {
+    width: 76px; height: 76px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent);
+    display: grid; place-items: center; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  }
+  .mic svg { width: 32px; height: 32px; }
+  .mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; transition: transform .15s ease, background .15s ease; }
+  .mic.holding {
+    background: var(--red); color: #fff; transform: scale(1.12);
+    box-shadow: 0 0 0 calc(8px + var(--lvl, 0) * 22px) color-mix(in srgb, var(--red) 20%, transparent);
+  }
+  /* Hold-to-talk overlay: timer card, and a lock target above the mic. */
+  #hold { position: fixed; inset: 0; z-index: 9; pointer-events: none; }
+  #hold .card2 {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 250px);
+    display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 10px 18px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.14); font-size: 15px;
+  }
+  #hold .card2 b { font-variant-numeric: tabular-nums; color: var(--red); font-size: 17px; }
+  #hold .card2 span { color: var(--muted); }
+  #hold.cancel .card2 { border-color: var(--red); }
+  #hold.cancel .card2 span { color: var(--red); font-weight: 600; }
+  #hold .lockpad {
+    position: absolute; left: 50%; bottom: calc(var(--safe-b) + 150px); width: 64px; height: 64px; margin-left: -32px;
+    border-radius: 50%; background: var(--surface); border: 1px solid var(--line); display: grid; place-items: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12); color: var(--muted);
+    transform: translateY(calc(var(--up, 0) * -14px)) scale(calc(1 + var(--up, 0) * .18));
+  }
+  #hold .lockpad svg { width: 24px; height: 24px; }
+  #hold .lockpad::after {
+    content: ""; position: absolute; inset: -5px; border-radius: 50%;
+    background: conic-gradient(var(--ink) calc(var(--up, 0) * 360deg), transparent 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0); mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
+  }
+  #hold.armed .lockpad { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  #hold .chev { position: absolute; left: 50%; bottom: calc(var(--safe-b) + 222px); margin-left: -8px; color: var(--faint); animation: rise 1.2s ease-in-out infinite; }
+  @keyframes rise { 0%, 100% { transform: translateY(4px); opacity: .3; } 50% { transform: translateY(-4px); opacity: 1; } }
+
+  .dock .to { grid-column: 1 / -1; text-align: center; font-size: 12px; color: var(--faint); margin-top: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- Top bar ---------- */
+  .bar {
+    position: sticky; top: 0; z-index: 5;
+    display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 4px;
+    padding: calc(var(--safe-t) + 6px) 8px 8px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .icon-btn {
+    width: 44px; height: 44px; border: 0; border-radius: 12px; background: none;
+    display: grid; place-items: center;
+  }
+  .icon-btn:active { background: var(--tap); }
+  .icon-btn svg { width: 24px; height: 24px; }
+  .bar .head { min-width: 0; text-align: center; }
+  .bar .head .t {
+    font-weight: 600; font-size: 16px; line-height: 1.25;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .bar .head .s { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .bar .head .s .live { color: var(--green); }
+  .bar .head .s .err { color: var(--red); }
+  .bar .head .s .wait { color: var(--amber); }
+  .mark {
+    border: 0; background: var(--blue); color: #fff; border-radius: 999px; font-size: 12px; font-weight: 700;
+    padding: 2px 9px; margin-left: 4px;
+  }
+
+  /* ---------- Thread ---------- */
+  .thread { min-height: 100dvh; display: flex; flex-direction: column; }
+  .messages { flex: 1; padding: 14px 18px 18px; }
+  .msg { margin: 0 0 18px; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user .bubble {
+    background: var(--mine); border-radius: 18px 18px 4px 18px; padding: 9px 14px;
+    max-width: 86%; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px;
+  }
+  .msg.user .bubble.long { max-height: 9.5em; overflow: hidden; position: relative; }
+  .msg.user .bubble.long::after {
+    content: ""; position: absolute; inset: auto 0 0 0; height: 2.5em;
+    background: linear-gradient(transparent, var(--mine));
+  }
+  .msg.assistant { overflow-wrap: anywhere; }
+  .msg .when { font-size: 12px; color: var(--faint); margin-top: 4px; }
+  .msg.user .when { text-align: right; }
+  .older { text-align: center; color: var(--faint); font-size: 13px; margin: 0 0 16px; }
+  .working {
+    display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 15px; margin: 4px 0 12px;
+  }
+
+  /* Markdown */
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 .75em; }
+  .md h1, .md h2, .md h3, .md h4 { font-size: 17px; margin: 1.1em 0 .4em; line-height: 1.3; }
+  .md h1, .md h2 { font-size: 19px; }
+  .md ul, .md ol { margin: 0 0 .75em; padding-left: 1.3em; }
+  .md li { margin: .2em 0; }
+  .md blockquote { margin: 0 0 .75em; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md code { font: 14px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  .md pre { background: var(--code); border-radius: 10px; padding: 10px 12px; overflow-x: auto; margin: 0 0 .75em; }
+  .md pre code { background: none; padding: 0; font-size: 13px; white-space: pre; }
+  .md .table { overflow-x: auto; margin: 0 0 .75em; }
+  .md table { border-collapse: collapse; font-size: 14px; }
+  .md th, .md td { border-bottom: 1px solid var(--line); padding: 6px 10px 6px 0; text-align: left; vertical-align: top; }
+  .md th { font-weight: 600; }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+  .md .path { font: 14px ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
+
+  /* Needs-you card */
+  .card {
+    margin: 0 12px 10px; padding: 14px 16px; border-radius: 16px;
+    background: var(--surface); border: 1px solid var(--line);
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+  }
+  .card .k { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--amber); }
+  .card .q { font-weight: 600; margin: 4px 0 10px; }
+  .card pre {
+    font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code);
+    border-radius: 10px; padding: 10px; margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 30vh; overflow-y: auto;
+  }
+  .choices { display: flex; flex-direction: column; gap: 8px; }
+  .choice {
+    text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px;
+    padding: 11px 14px;
+  }
+  .choice.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .choice small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btn {
+    flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 12px;
+    padding: 12px; font-weight: 600; text-align: center; text-decoration: none; color: var(--ink);
+  }
+  .btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .btn.danger { background: var(--red); color: #fff; border-color: var(--red); }
+  .btn:disabled { opacity: .5; }
+  .card input[type=text] {
+    width: 100%; margin-top: 8px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  /* Jump to latest */
+  .tobottom {
+    position: fixed; right: 14px; bottom: var(--jump-b, 120px); z-index: 6;
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    display: grid; place-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+  }
+  .tobottom svg { width: 20px; height: 20px; }
+  .tobottom .newdot { position: absolute; top: 2px; right: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
+
+  /* Quick replies */
+  .pills { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .pills::-webkit-scrollbar { display: none; }
+  .pill2 {
+    position: relative; overflow: hidden; flex: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 999px; padding: 9px 15px; font-size: 15px; font-weight: 600; white-space: nowrap;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .pill2:active { transform: scale(.97); }
+  /* Sol's recommended reply on a stale thread */
+  .pill2.rec { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 16%, var(--surface)); }
+  .recwhy { font-size: 13px; color: var(--muted); margin: 0 4px 8px; line-height: 1.35; }
+  .recwhy b { color: var(--blue); font-weight: 700; }
+  .recwhy .stake { color: var(--ink); font-weight: 600; margin-bottom: 3px; }
+  .homerec { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin-top: 8px; min-width: 0; }
+  .homerec .pill2 { padding: 7px 13px; font-size: 14px; }
+  .homerec .why2 { font-size: 13px; color: var(--muted); min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* Holding still: a slow fill says "keep holding to edit". */
+  .pill2.pressing::after {
+    content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--blue) 28%, transparent);
+    transform-origin: left; animation: fill .5s linear forwards;
+  }
+  .pill2:disabled { opacity: .4; }
+  .pill2.sending { border-color: var(--ink); }
+  .pill2.sending::before {
+    content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--ink) 12%, transparent);
+    transform-origin: left; animation: fill 2s linear forwards;
+  }
+  .pill2 span { position: relative; }
+  @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+  /* Composer */
+  .composer {
+    position: sticky; bottom: 0; z-index: 5;
+    padding: 8px 12px calc(var(--safe-b) + 10px);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  }
+  .field {
+    display: flex; align-items: flex-end; gap: 6px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 5px;
+  }
+  .field textarea {
+    flex: 1; border: 0; outline: 0; background: none; resize: none; padding: 8px 0 8px 4px;
+    max-height: 40vh; line-height: 1.35; font-size: 17px;
+  }
+  .round {
+    width: 38px; height: 38px; border-radius: 50%; border: 0; flex: none;
+    display: grid; place-items: center; background: none;
+  }
+  .round.fill { background: var(--accent); color: var(--on-accent); }
+  .round:disabled { opacity: .25; }
+  .round svg { width: 20px; height: 20px; }
+  .recbar {
+    display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 14px; min-height: 38px; flex: 1; min-width: 0;
+    font-variant-numeric: tabular-nums; color: var(--red); font-weight: 600;
+  }
+  .recbar .grow { flex: 1; color: var(--muted); font-weight: 500; font-size: 15px; }
+  .recbar button { border: 0; background: none; color: var(--muted); font-weight: 600; padding: 8px; }
+  .recdot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: pulse 1s infinite; }
+
+  /* Sheets */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.32); z-index: 20; }
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+    background: var(--surface); border-radius: 20px 20px 0 0;
+    padding: 8px 12px calc(var(--safe-b) + 12px); max-width: 680px; margin: 0 auto;
+    max-height: 88dvh; overflow-y: auto;
+  }
+  #sheet .menu button, #sheet .menu a {
+    display: block; width: 100%; text-align: left; border: 0; background: none;
+    padding: 15px 12px; font-size: 17px; border-radius: 12px; color: var(--ink); text-decoration: none;
+  }
+  #sheet .menu button:active, #sheet .menu a:active { background: var(--tap); }
+  #sheet .danger { color: var(--red); }
+  .grab { width: 38px; height: 5px; border-radius: 3px; background: var(--line); margin: 2px auto 10px; }
+
+  /* Voice sheet */
+  .voice { padding: 6px 8px 4px; }
+  .voice .to {
+    display: flex; align-items: center; gap: 8px; width: 100%; border: 1px solid var(--line); background: var(--bg);
+    border-radius: 12px; padding: 10px 12px; text-align: left; font-size: 15px;
+  }
+  .voice .to b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .voice .to span { color: var(--muted); }
+  .voice .stage { display: grid; justify-items: center; gap: 14px; padding: 26px 0 18px; }
+  .orb {
+    width: 118px; height: 118px; border-radius: 50%; background: var(--red); display: grid; place-items: center; color: #fff;
+    box-shadow: 0 0 0 calc(var(--lvl, 0) * 26px) color-mix(in srgb, var(--red) 22%, transparent);
+    transition: box-shadow .08s linear;
+  }
+  .orb svg { width: 40px; height: 40px; }
+  .orb.busy { background: var(--muted); animation: pulse 1.2s infinite; }
+  .clock { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .voice .note { color: var(--muted); font-size: 15px; text-align: center; }
+  .voice textarea {
+    width: 100%; min-height: 120px; max-height: 42dvh; border: 1px solid var(--line); border-radius: 14px; background: var(--bg);
+    padding: 12px 14px; font-size: 18px; line-height: 1.4; resize: none; outline: 0; margin: 12px 0 2px;
+  }
+  .picklist { list-style: none; margin: 6px 0 0; padding: 0; }
+  .picklist button {
+    display: block; width: 100%; text-align: left; border: 0; background: none; padding: 12px; border-radius: 12px;
+  }
+  .picklist button:active, .picklist button.on { background: var(--tap); }
+  .picklist .sub { color: var(--muted); font-size: 13px; }
+  #sheet h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 12px 4px; }
+
+  /* ---------- New ---------- */
+  #new { min-height: 100dvh; display: flex; flex-direction: column; }
+  #new .body { flex: 1; padding: 18px 20px; }
+  #new textarea {
+    width: 100%; min-height: 30vh; border: 0; outline: 0; background: none; resize: none;
+    font-size: 20px; line-height: 1.4; padding: 0;
+  }
+  #new textarea::placeholder { color: var(--faint); }
+  .dictate { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 999px; padding: 8px 14px; font-size: 15px; font-weight: 600; }
+  .dictate svg { width: 18px; height: 18px; }
+  .dictate.on { color: var(--red); border-color: var(--red); }
+  .label { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 8px 14px; font-size: 15px;
+  }
+  .chip.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  #new select {
+    margin-top: 10px; width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  }
+  #new .go { padding: 12px 20px calc(var(--safe-b) + 14px); }
+  #new .go .btn { width: 100%; padding: 15px; font-size: 17px; }
+
+  /* ---------- Artifacts ---------- */
+  .artifacts { min-height: 100dvh; padding-bottom: calc(var(--safe-b) + 30px); }
+  .seg { display: flex; gap: 6px; padding: 12px 16px 4px; align-items: center; }
+  .seg button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 14px; font-size: 14px; font-weight: 600; }
+  .seg button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .seg .spacer { flex: 1; }
+  .seg .plain { border: 0; background: none; color: var(--muted); font-weight: 500; }
+  .art { display: grid; grid-template-columns: 40px 1fr; gap: 12px; padding: 11px 18px; text-decoration: none; color: inherit; align-items: start; }
+  .art:active { background: var(--tap); }
+  .glyph {
+    width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+    letter-spacing: .02em; color: #fff; background: #8a857c;
+  }
+  .glyph.doc { background: #2f68e8; } .glyph.sheet { background: #1f9a5c; } .glyph.slides { background: #d99a00; }
+  .glyph.drive { background: #5b6b82; } .glyph.pdf { background: #cf3f36; } .glyph.page { background: #6a4fd6; }
+  .glyph.video { background: #7c3aed; } .glyph.design { background: #db2777; } .glyph.link { background: #0f766e; }
+  .glyph.note { background: #8a857c; } .glyph.image { background: #b45309; }
+  .art > span:last-child { min-width: 0; }
+  .art .l { font-weight: 500; overflow-wrap: anywhere; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .art.fresh .l { font-weight: 700; }
+  .art.fresh .l::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); margin-right: 7px; vertical-align: 2px; }
+  .art .m { color: var(--faint); font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- Walk (Talk to BB) ---------- */
+  /* A fixed-height screen: captions scroll, End is always on screen. */
+  .walk { height: 100dvh; display: flex; flex-direction: column; }
+  .walk .body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 20px 0; }
+  .walk .status { text-align: center; color: var(--muted); font-size: 15px; margin: 8px 0 0; min-height: 1.4em; }
+  .walk .orbwrap { display: grid; place-items: center; padding: 22px 0 16px; flex: none; }
+  .worb {
+    width: 150px; height: 150px; border-radius: 50%; background: var(--mine); display: grid; place-items: center;
+    transition: transform .25s ease, background .25s ease;
+  }
+  .worb svg { width: 46px; height: 46px; }
+  .worb.live { background: var(--green); color: #fff; }
+  .worb.speaking { background: var(--blue); color: #fff; transform: scale(1.06); }
+  .worb.paused { background: var(--faint); color: #fff; }
+  .captions { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 10px; }
+  .cap { margin: 0 0 14px; font-size: 19px; line-height: 1.4; }
+  .cap.you { color: var(--muted); font-size: 16px; }
+  .cap b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .receipts { border-top: 1px solid var(--line); padding: 8px 0; max-height: 26dvh; overflow-y: auto; flex: none; }
+  .receipt { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 0; }
+  .receipt small { display: block; color: var(--muted); font-size: 13px; }
+  .walk .controls { display: flex; gap: 10px; padding: 12px 20px calc(var(--safe-b) + 16px); flex: none; }
+  .walk .controls .btn { padding: 15px 10px; }
+
+  /* Model chip over the reply box: shown while you're typing */
+  .cmodel { padding: 0 4px 6px; }
+  .cmodel button { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px;
+    padding: 5px 11px; font-size: 13px; font-weight: 600; }
+  /* ---------- Machines & models ---------- */
+  .mline { display: flex; flex-wrap: wrap; gap: 12px; margin: -4px 20px 8px; font-size: 12px; color: var(--muted); }
+  .mline span { display: inline-flex; align-items: center; gap: 5px; }
+  .mdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
+  .mdot.off { background: transparent; border: 1.5px solid var(--faint); }
+  .mline .off-name { color: var(--faint); }
+  .chip:disabled { opacity: .45; }
+  .modelrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
+    border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 11px 14px; font-size: 15px; }
+  .modelrow .go { color: var(--blue); font-weight: 600; flex: none; }
+  .bar .head .s .tapsub { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .pick h3 { margin: 12px 8px 6px; }
+  .pick .plist { list-style: none; margin: 0; padding: 0; }
+  .pick .plist button { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; border: 0; background: none; padding: 12px; border-radius: 12px; font-size: 16px; }
+  .pick .plist button.on { background: var(--tap); font-weight: 700; }
+  .pick .plist small { color: var(--muted); font-weight: 500; }
+  .pick .chips { padding: 0 8px; }
+  .execinfo { padding: 4px 12px 8px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+  .execinfo b { color: var(--ink); }
+
+  /* ---------- Search ---------- */
+  .srchbox { display: flex; align-items: center; gap: 8px; margin: 4px 16px 12px; padding: 0 6px 0 12px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--line); }
+  .srchbox svg { width: 18px; height: 18px; color: var(--faint); flex: none; }
+  .srchbox input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 10px 0; font-size: 16px; -webkit-appearance: none; }
+  .srchbox button { border: 0; background: none; color: var(--blue); font-weight: 600; padding: 8px; }
+  .srow { display: block; padding: 11px 20px; text-decoration: none; color: inherit; }
+  .srow:active { background: var(--tap); }
+  .srow .st { font-weight: 600; line-height: 1.3; }
+  .srow .ss { color: var(--muted); font-size: 14px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .srow .ss mark { background: color-mix(in srgb, var(--blue) 30%, transparent); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+  .srow .sm { color: var(--faint); font-size: 12px; margin-top: 3px; }
+  /* Long press on a home row */
+  .row.rowhold { background: color-mix(in srgb, var(--ink) 9%, var(--bg)); transition: background .45s ease; }
+  /* ✨ Suggest sits between Cancel and Save, away from the text field */
+  .btn.aibtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--blue); border-color: color-mix(in srgb, var(--blue) 45%, var(--line)); }
+  .btn.aibtn svg { display: inline-block; flex: none; }
+  .btn.aibtn.thinking { animation: pulse 1s ease-in-out infinite; }
+  .renamebox input { width: 100%; font-size: 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin: 6px 0 4px; }
+
+  /* ---------- Thread artifacts tray (right drawer) ---------- */
+  #thread .bar { grid-template-columns: 44px 1fr 44px 44px; }
+  .trayb { position: relative; }
+  .trayb-n { position: absolute; top: 4px; right: 2px; min-width: 16px; height: 16px; border-radius: 8px; padding: 0 4px;
+    background: var(--blue); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+  .ttray-scrim { position: fixed; inset: 0; z-index: 24; background: rgba(0,0,0,.34); opacity: 0; transition: opacity .2s ease; }
+  .ttray-panel {
+    position: fixed; top: 0; bottom: 0; right: 0; z-index: 25; width: min(86vw, 420px);
+    background: var(--bg); border-left: 1px solid var(--line); box-shadow: -8px 0 30px rgba(0,0,0,.25);
+    padding: calc(var(--safe-t) + 10px) 0 calc(var(--safe-b) + 16px); overflow-y: auto;
+    transform: translateX(102%); transition: transform .22s ease;
+  }
+  #threadTray.ttray-open .ttray-scrim { opacity: 1; }
+  #threadTray.ttray-open .ttray-panel { transform: translateX(0); }
+  .ttray-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 6px 18px; }
+  .ttray-title { font-size: 20px; font-weight: 700; }
+  .ttray-empty { padding: 18px; color: var(--muted); font-size: 15px; }
+
+  /* ---------- Drafts ---------- */
+  .draftsrow { display: flex; align-items: center; gap: 10px; margin: 0 16px 8px; padding: 12px 14px; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--line); text-decoration: none; color: var(--ink); font-size: 15px; }
+  .draftsrow b { font-weight: 700; }
+  .draftsrow .go { margin-left: auto; color: var(--faint); }
+  .draft { border-bottom: 1px solid var(--line); }
+  .draft > button { display: grid; grid-template-columns: 40px 1fr; gap: 12px; width: 100%; text-align: left; border: 0; background: none; padding: 12px 18px; }
+  .draft > button:active { background: var(--tap); }
+  .draft .who { font-weight: 600; }
+  .draft .subj { font-size: 15px; }
+  .draft .snip { color: var(--muted); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .draft .m { color: var(--faint); font-size: 12px; margin-top: 3px; }
+  .draft .m .older { color: var(--amber); font-weight: 600; }
+  .draft .open { padding: 0 18px 14px 70px; }
+  .draft .body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px; max-height: 50dvh; overflow-y: auto; }
+  .draft .hdr { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .glyph.gmail { background: #cf3f36; } .glyph.slackg { background: #4a154b; }
+  details.olderdrafts summary { list-style: none; padding: 14px 20px; color: var(--muted); font-size: 14px; }
+  details.olderdrafts summary::-webkit-details-marker { display: none; }
+
+  /* ---------- Tell ---------- */
+  .tellv { min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--safe-t) + 40px) 22px calc(var(--safe-b) + 20px); }
+  .tellv .tbody { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+  .tto { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .tcard { font-size: 22px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50dvh; overflow-y: auto; }
+  .tstatus { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 16px; min-height: 28px; }
+  .tstatus .ok { color: var(--green); font-weight: 700; }
+  .ring { width: 26px; height: 26px; border-radius: 50%; background: conic-gradient(var(--ink) calc(var(--p, 0) * 360deg), var(--line) 0);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0); mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0); }
+  .tbtns { display: flex; gap: 10px; }
+  .tbtns .btn { padding: 15px; font-size: 17px; }
+  /* ---------- Setup ---------- */
+  .setup { padding: 8px 20px calc(var(--safe-b) + 30px); }
+  .setup p { color: var(--muted); font-size: 15px; }
+  .setup ol { padding-left: 1.2em; margin: 8px 0 16px; }
+  .setup li { margin: 10px 0; }
+  .setup code { font: 13px ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  .setup .urlbox { font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 10px; padding: 10px; overflow-wrap: anywhere; margin: 8px 0; }
+  .setup h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 4px; }
+  .setuplink { display: block; margin: 26px 20px 0; color: var(--muted); font-size: 14px; text-decoration: none; }
+
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 150px);
+    background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 15px; box-shadow: 0 4px 18px rgba(0,0,0,.2);
+    z-index: 30; max-width: calc(100vw - 40px);
+  }
+  .fail { padding: 40px 24px; color: var(--muted); }
+  .toast.undoable { display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 16px; overflow: hidden; max-width: calc(100vw - 32px); }
+  .toast.undoable .tt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .toast.undoable button { border: 0; border-radius: 9px; padding: 8px 14px; font-weight: 700; background: var(--bg); color: var(--ink); flex: none; }
+  .toast.undoable .drain { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--blue); transform-origin: left; animation: undoDrain 5s linear forwards; }
+  @keyframes undoDrain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+</style>
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<main id="home" class="view home" hidden>
+  <div class="masthead">
+    <h1>Pocket</h1>
+    <button class="pill" id="talkBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-6h1a2 2 0 0 1 2 2zM3 15a2 2 0 0 0 2 2h1v-6H5a2 2 0 0 0-2 2z"/></svg>Walk</button>
+  </div>
+  <div class="srchbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search threads and artifacts" enterkeyhint="search" autocomplete="off" autocorrect="off"><button id="qCancel" hidden>Cancel</button></div>
+  <div class="summary" id="summary"></div>
+  <div class="mline" id="machineLine"></div>
+  <div id="lists"></div>
+  <div id="searchResults" hidden></div>
+</main>
+
+<nav class="dock" id="dock" hidden>
+  <button class="dock-side" id="artBtn" aria-label="Artifacts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v12H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>Artifacts<span class="badge" id="artBadge" hidden></span></button>
+  <button class="mic" id="micBtn" aria-label="Talk to the manager"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></button>
+  <button class="dock-side" id="newBtn" aria-label="New thread"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>New</button>
+  <div class="to" id="dockTo"></div>
+</nav>
+
+<!-- ============ THREAD ============ -->
+<main id="thread" class="view thread" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t" id="tTitle"></div><div class="s" id="tSub"></div></div>
+    <button class="icon-btn trayb" id="trayBtn" aria-label="Artifacts from this thread"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v12H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg><span class="trayb-n" id="trayCount" hidden></span></button>
+    <button class="icon-btn" id="menuBtn" aria-label="More"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+  </div>
+  <div class="messages" id="messages"></div>
+  <button class="tobottom" id="toBottom" hidden aria-label="Jump to the latest message"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span class="newdot" id="newDot" hidden></span></button>
+  <div class="composer">
+    <div id="cards"></div>
+    <div class="recwhy" id="recWhy" hidden></div>
+    <div class="pills" id="pills"></div>
+    <div class="cmodel" id="cmodel" hidden><button id="modelChip"><span id="modelChipText"></span> ▾</button></div>
+    <form class="field" id="replyForm">
+      <button type="button" class="round" id="replyMic" aria-label="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></button>
+      <textarea id="reply" rows="1" placeholder="Reply"></textarea>
+      <div class="recbar" id="replyRec" hidden><span class="recdot"></span><span id="replyClock">0:00</span><span class="grow" id="replyRecNote">Listening…</span><button type="button" id="replyRecCancel">Cancel</button><button type="button" id="replyRecDone" style="color:var(--ink)">Done</button></div>
+      <button class="round fill" id="sendBtn" disabled aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </form>
+  </div>
+</main>
+
+<!-- ============ NEW ============ -->
+<main id="new" class="view new" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">New thread</div></div>
+    <span></span>
+  </div>
+  <div class="body">
+    <textarea id="prompt" placeholder="What should an agent do?"></textarea>
+    <button class="dictate" id="newMic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg><span>Dictate</span></button>
+    <div class="label">In</div>
+    <div class="chips" id="chips"></div>
+    <select id="allProjects" hidden></select>
+    <div class="label">Runs on</div>
+    <div class="chips" id="machineChips"></div>
+    <div class="label">Model</div>
+    <button class="modelrow" id="newModel"><span id="newModelText">Project default</span><span class="go">Change</span></button>
+  </div>
+  <div class="go"><button class="btn primary" id="startBtn" disabled>Start</button></div>
+</main>
+
+<!-- ============ ARTIFACTS ============ -->
+<main id="artifacts" class="view artifacts" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">Artifacts</div></div>
+    <span></span>
+  </div>
+  <div class="seg">
+    <button data-f="primary" class="on">For you</button><button data-f="all">Everything</button>
+    <span class="spacer"></span><button class="plain" id="allSeen">Mark all seen</button>
+  </div>
+  <div id="artList"></div>
+</main>
+
+<!-- ============ DRAFTS ============ -->
+<main id="drafts" class="view" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">Drafts to send</div><div class="s">Pocket never sends. Open one to send it yourself.</div></div>
+    <span></span>
+  </div>
+  <div id="draftList"></div>
+</main>
+
+<!-- ============ TELL (from the iOS Shortcut) ============ -->
+<main id="tell" class="view tellv" hidden>
+  <div class="tbody">
+    <div class="tto" id="tellTo">To your manager</div>
+    <div class="tcard" id="tellText"></div>
+    <div class="tstatus" id="tellStatus"></div>
+  </div>
+  <div class="tbtns" id="tellBtns"></div>
+</main>
+
+<!-- ============ SHORTCUT SETUP ============ -->
+<main id="shortcut" class="view" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">Siri &amp; Action Button</div></div>
+    <span></span>
+  </div>
+  <div class="setup" id="setupBody"></div>
+</main>
+
+<!-- ============ WALK ============ -->
+<main id="walk" class="view walk" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">Walk</div><div class="s">Talk to BB, hands free</div></div>
+    <span></span>
+  </div>
+  <div class="body">
+    <div class="orbwrap"><div class="worb" id="worb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></div></div>
+    <p class="status" id="walkStatus">Talk through your work with BB. It can check threads, start agents and pass messages.</p>
+    <div class="captions" id="captions"></div>
+    <div class="receipts" id="receipts" hidden></div>
+  </div>
+  <div class="controls" id="walkControls"></div>
+</main>
+
+<div id="hold" hidden>
+  <div class="card2"><span class="recdot"></span><b id="hClock">0:00</b><span id="hHint">Release to finish</span></div>
+  <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+  <div class="lockpad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+</div>
+
+<!-- Swipe right in a thread: this thread's artifacts. -->
+<div id="threadTray" hidden>
+  <div class="ttray-scrim" id="threadTrayScrim"></div>
+  <aside class="ttray-panel" id="threadTrayPanel">
+    <div class="ttray-head"><div class="ttray-title">From this thread</div><button class="icon-btn" id="threadTrayClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div id="threadTrayList"></div>
+  </aside>
+</div>
+
+<div id="sheetWrap" hidden>
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+"use strict";
+const API = "/api/v1/plugins/pocket/rpc/";
+const TALK = "/api/v1/plugins/talk-to-bb";
+const $ = (id) => document.getElementById(id);
+const state = { home: null, thread: null, showAll: false, project: null, busy: false, draft: "", artifacts: null, artFilter: "primary", swiping: false };
+let timer = null;
+const ICON_MIC = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>`;
+
+// ---------- data ----------
+async function rpc(method, input = null, base = API) {
+  const res = await fetch(base + method, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(input),
+  });
+  let body = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok || !body || body.ok === false) {
+    const msg = body?.error?.message || body?.message || `${res.status} ${res.statusText}`;
+    throw new Error(msg);
+  }
+  return body.result;
+}
+
+// ---------- helpers ----------
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function ago(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 86400 * 7) return `${Math.floor(s / 86400)}d`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function clock(ms) {
+  const d = new Date(ms);
+  const today = new Date().toDateString() === d.toDateString();
+  const t = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return today ? t : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${t}`;
+}
+
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+function toast(text) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+const isWorking = (s) => s === "active" || s === "running" || s === "starting";
+
+function kindOf(t) {
+  if (t.pending) return "question";
+  if (isWorking(t.status)) return "working";
+  if (t.status === "error") return "error";
+  if (t.unread) return "reply";
+  return "idle";
+}
+const threadById = (id) => state.home?.threads.find((t) => t.id === id);
+
+// ---------- tiny markdown ----------
+function inline(s) {
+  s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
+    const raw = href.replace(/&amp;/g, "&");
+    if (/^https?:\/\//i.test(raw)) return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
+    return `<span class="path">${label}</span>`;
+  });
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+  return s;
+}
+
+function md(src) {
+  const lines = esc(src).split("\n");
+  const out = [];
+  let i = 0;
+  const para = [];
+  const flush = () => { if (para.length) { out.push(`<p>${inline(para.join("<br>"))}</p>`); para.length = 0; } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      flush();
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
+      i++;
+      out.push(`<pre><code>${buf.join("\n")}</code></pre>`);
+      continue;
+    }
+    if (/^\s*$/.test(line)) { flush(); i++; continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; continue; }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { flush(); out.push("<hr>"); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      flush();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim()));
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++]));
+      out.push(`<div class="table"><table><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table></div>`);
+      continue;
+    }
+    if (/^\s*&gt;\s?/.test(line)) {
+      flush();
+      const buf = [];
+      while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*&gt;\s?/, ""));
+      out.push(`<blockquote>${inline(buf.join("<br>"))}</blockquote>`);
+      continue;
+    }
+    const li = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      flush();
+      const ordered = /\d/.test(li[1]);
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^\s*([-*+]|\d+[.)])\s+(.*)$/);
+        if (m) { items.push(m[2]); i++; continue; }
+        if (/^\s{2,}\S/.test(lines[i]) && items.length) { items[items.length - 1] += "<br>" + lines[i].trim(); i++; continue; }
+        break;
+      }
+      const tag = ordered ? "ol" : "ul";
+      out.push(`<${tag}>${items.map((t) => `<li>${inline(t)}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+    para.push(line);
+    i++;
+  }
+  flush();
+  return out.join("");
+}
+
+// ---------- audio session ----------
+// Pocket must not own the phone's audio when it isn't recording: iOS stops
+// Spotify/YouTube (and drops them from the Dynamic Island) for any page that
+// holds a non-mixable audio session. Safari's Audio Session API lets a page
+// say what it's doing: "ambient" sounds mix with other audio like a keyboard
+// click; "play-and-record" is needed only while the mic is open.
+function audioSession(type) {
+  try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {}
+}
+audioSession("ambient");
+
+// After recording, go straight back to "ambient". Tested 9/24 on an iPhone
+// (home-screen app, API present): no way of letting go (ambient, auto,
+// transient-solo) made iOS resume Spotify. Safari never signals "done" to
+// the app it paused, and it doesn't report its session state to the page.
+// Spotify stays in the Dynamic Island, one tap from playing.
+function releaseAudio() { audioSession("ambient"); }
+
+// ---------- recorder ----------
+// One recorder for every voice entry point. iOS Safari records audio/mp4,
+// Chrome records webm; the server transcribes either.
+// It also measures loudness, because the transcriber invents text when it is
+// handed silence: a recording that never rises above room noise is not sent.
+// The mic stream is kept open briefly between notes only when opening it was
+// slow (AirPods took ~1s on 9/24, and speech in that second was lost). An open
+// mic keeps the phone in call mode and holds other audio paused, so the phone's
+// own fast mic closes right away and a slow one after MIC_IDLE_MS.
+const MIC_IDLE_MS = 10000, SLOW_MIC_MS = 400;
+// Notes are captured as raw 16 kHz samples through an AudioWorklet (the path
+// Walk uses) and sent as WAV. MediaRecorder recorded pure silence on 9/25 with
+// the iPhone plugged into a Mac as its audio device, while Walk's worklet
+// heard fine on the same route. MediaRecorder stays as the fallback for a
+// browser without worklets.
+const CAPTURE_URL = "/api/v1/plugins/pocket/http/capture.js";
+function wavBlob(chunks, rate) {
+  const n = chunks.reduce((sum, c) => sum + c.length, 0);
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const tag = (o, t) => { for (let i = 0; i < 4; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  tag(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); tag(8, "WAVE");
+  tag(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  tag(36, "data"); v.setUint32(40, n * 2, true);
+  const out = new Int16Array(buf, 44, n);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return new Blob([buf], { type: "audio/wav" });
+}
+const recorder = {
+  mr: null, pcm: null, node: null, stream: null, chunks: [], ctx: null, raf: 0, started: 0, peak: 0, voiced: 0, level: 0, fresh: false, lastStats: null, idle: 0, slow: false,
+  get active() { return !!this.mr || !!this.pcm; },
+  live() { return this.stream?.getAudioTracks()[0]?.readyState === "live"; },
+  async open() {
+    clearTimeout(this.idle);
+    if (this.live()) return true;
+    audioSession("play-and-record");
+    const t0 = Date.now();
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    } catch (e) { audioSession("ambient"); throw e; }
+    this.slow = Date.now() - t0 > SLOW_MIC_MS;
+    return false;
+  },
+  closeMic() {
+    clearTimeout(this.idle);
+    if (this.active) return;
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    // Give the phone's audio back (after the stop cue has had time to play).
+    setTimeout(() => { if (!this.stream && walk.phase === "idle") releaseAudio(); }, 400);
+  },
+  keepWarm() {
+    clearTimeout(this.idle);
+    // No warm mic any more (9/24): an open mic holds your music paused, and the
+    // start cue now waits for a live mic, so a slow AirPods start costs a wait,
+    // not lost words.
+    this.idle = setTimeout(() => this.closeMic(), 0);
+  },
+  async start(onTick) {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser can't record audio here.");
+    const asked = Date.now();
+    // The context and its worklet load while the mic permission settles, so
+    // the worklet path adds no wait before the start cue.
+    let ctx = null, loading = null;
+    audioSession("play-and-record"); // before the context, as Walk does
+    if (window.AudioWorkletNode) {
+      try { ctx = new AudioContext({ sampleRate: 16000 }); } catch { try { ctx = new AudioContext(); } catch {} }
+      if (ctx) { ctx.resume().catch(() => {}); loading = ctx.audioWorklet.addModule(CAPTURE_URL); loading.catch(() => {}); }
+    }
+    let warm;
+    try { warm = await this.open(); } catch (e) { ctx?.close().catch(() => {}); throw e; }
+    const track = this.stream.getAudioTracks()[0];
+    let settings = {};
+    try { settings = track?.getSettings?.() || {}; } catch {}
+    this.info = { mic: track?.label || "?", micMs: Date.now() - asked, warm, sampleRate: settings.sampleRate ?? null, micState: track?.readyState, muted: track?.muted ?? null };
+    this.peak = 0; this.voiced = 0; this.level = 0; this.fresh = false;
+    if (ctx) {
+      try {
+        await loading;
+        await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 1500))]);
+        if (ctx.state !== "running") throw new Error(`context ${ctx.state}`);
+        const node = new AudioWorkletNode(ctx, "pocket-capture");
+        this.pcm = [];
+        node.port.onmessage = ({ data }) => {
+          if (!this.pcm) return;
+          const a = new Int16Array(data);
+          this.pcm.push(a);
+          let p = 0;
+          for (let i = 0; i < a.length; i++) { const x = a[i] < 0 ? -a[i] : a[i]; if (x > p) p = x; }
+          // Same scale as the old analyser meter (byte deviation / 60), so
+          // the silence gate and the server's "heard" bar keep their calibration.
+          const lvl = Math.min(1, (p / 32768) * 128 / 60);
+          this.level = this.fresh ? Math.max(this.level, lvl) : lvl;
+          this.fresh = true;
+        };
+        ctx.createMediaStreamSource(this.stream).connect(node);
+        node.connect(ctx.destination);
+        this.ctx = ctx; this.node = node;
+        Object.assign(this.info, { path: "pcm", ctxRate: ctx.sampleRate });
+      } catch (e) {
+        this.pcm = null;
+        this.info.pcmError = String(e?.message || e).slice(0, 100);
+        ctx.close().catch(() => {});
+      }
+    }
+    if (!this.pcm) {
+      if (!window.MediaRecorder) throw new Error("This browser can't record audio here.");
+      const type = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"].find((t) => MediaRecorder.isTypeSupported?.(t));
+      this.mr = new MediaRecorder(this.stream, type ? { mimeType: type } : undefined);
+      this.chunks = [];
+      this.mr.ondataavailable = (e) => { if (e.data.size) this.chunks.push(e.data); };
+      this.mr.start(250);
+      this.info.path = "mr";
+    }
+    this.started = Date.now();
+    const count = (lvl) => {
+      this.peak = Math.max(this.peak, lvl);
+      if (lvl > 0.18 && Date.now() - this.started > 300) this.voiced++;
+      onTick?.((Date.now() - this.started) / 1000, lvl);
+    };
+    if (this.pcm) {
+      const loop = () => { const lvl = this.level; this.fresh = false; count(lvl); this.raf = requestAnimationFrame(loop); };
+      loop();
+      return;
+    }
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.ctx.resume?.().catch(() => {});
+      const analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 512;
+      this.ctx.createMediaStreamSource(this.stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      const loop = () => {
+        analyser.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+        count(Math.min(1, peak / 60));
+        this.raf = requestAnimationFrame(loop);
+      };
+      loop();
+    } catch {
+      const tick = () => { onTick?.((Date.now() - this.started) / 1000, 0); this.raf = requestAnimationFrame(tick); };
+      tick();
+    }
+  },
+  stats(blob) {
+    return {
+      voiced: this.voiced, peak: Number(this.peak.toFixed(3)),
+      metered: this.pcm ? this.pcm.length > 0 : this.ctx?.state === "running",
+      ctxState: this.ctx?.state ?? null, ms: Date.now() - this.started, bytes: blob.size, mime: blob.type, ...this.info,
+    };
+  },
+  stop() {
+    return new Promise((resolve) => {
+      if (this.pcm) {
+        // Let the last chunks in flight from the worklet arrive.
+        setTimeout(() => {
+          if (!this.pcm) return resolve(null);
+          const blob = wavBlob(this.pcm, this.ctx.sampleRate);
+          this.lastStats = this.stats(blob);
+          this.release();
+          resolve(blob);
+        }, 60);
+        return;
+      }
+      const mr = this.mr;
+      if (!mr) return resolve(null);
+      mr.onstop = () => {
+        const blob = new Blob(this.chunks, { type: mr.mimeType || "audio/mp4" });
+        this.lastStats = this.stats(blob);
+        this.release();
+        resolve(blob);
+      };
+      mr.stop();
+    });
+  },
+  cancel() {
+    if (this.mr) { this.mr.onstop = null; try { this.mr.stop(); } catch {} }
+    this.release();
+  },
+  release() {
+    cancelAnimationFrame(this.raf);
+    try { this.node?.disconnect(); } catch {}
+    this.ctx?.close().catch(() => {});
+    this.mr = null; this.pcm = null; this.node = null; this.ctx = null;
+    this.keepWarm();
+  },
+};
+document.addEventListener("visibilitychange", () => { if (document.hidden) recorder.closeMic(); });
+
+// One line per recording in the plugin log (mic, timings, meter, outcome), so
+// device-specific trouble (headphones, Bluetooth) can be read, not guessed.
+function voiceLog(outcome, extra = {}) {
+  rpc("voiceLog", { outcome, ...(recorder.lastStats || {}), ...extra }).catch(() => {});
+}
+
+async function transcribe(blob) {
+  if (!blob || blob.size < 1200) { voiceLog("too-small"); throw new Error("Didn't catch anything. Try again."); }
+  // Only trust the meter if its audio context was running and it moved at
+  // all. A suspended context, or a Bluetooth route that feeds the meter
+  // nothing, reads perfectly flat and would otherwise block every recording.
+  // Real mics always have some noise floor, so a flat zero is never evidence.
+  const st = recorder.lastStats;
+  // The page only stops true silence: nothing in the whole recording rose
+  // above a whisper. How loud speech reads depends on the mic (AirPods came
+  // in at about a third of the phone's), so anything louder is sent and the
+  // server's confidence check decides.
+  if (st?.metered && st.peak > 0 && st.peak < 0.12) { voiceLog("gated-silent"); throw new Error("Didn't hear anything, so nothing was sent."); }
+  // Raw samples that are exactly zero throughout mean the route delivered no
+  // audio at all (a real mic always has a noise floor). Sending it only gets
+  // text invented from nothing.
+  if (st?.path === "pcm" && st.metered && st.peak === 0) { voiceLog("dead-mic"); throw new Error("The mic sent no sound. Try again, or switch the audio device."); }
+  const b64 = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = () => reject(new Error("Couldn't read the recording."));
+    r.readAsDataURL(blob);
+  });
+  let text;
+  try { ({ text } = await rpc("transcribe", { audio: b64, mime: blob.type || "audio/mp4", ...(st?.metered && st.peak > 0 ? { heard: st.voiced } : {}) })); }
+  catch (e) { voiceLog("error", { error: String(e.message).slice(0, 200) }); throw e; }
+  voiceLog(text.trim() ? "ok" : "empty", { chars: text.trim().length });
+  if (!text.trim()) throw new Error("Didn't catch anything. Try again.");
+  return text.trim();
+}
+
+const micError = (e) => e?.name === "NotAllowedError" ? "Microphone blocked. Allow it for this site in Settings, then try again." : e?.message || String(e);
+
+// ---------- sheets ----------
+let sheetOpenedAt = 0;
+function openSheet(html) {
+  sheetOpenedAt = Date.now();
+  $("sheet").innerHTML = `<div class="grab"></div>${html}`;
+  $("sheetWrap").hidden = false;
+  return $("sheet");
+}
+function closeSheet() {
+  $("sheetWrap").hidden = true;
+  $("sheet").innerHTML = "";
+  if (voice.phase === "recording") recorder.cancel();
+  voice.phase = "idle";
+}
+// Tapping outside never throws away a recording in progress; Cancel does.
+// Lifting the finger after a long press lands a tap on the backdrop that just
+// appeared under it; that tap must not close the menu it opened.
+$("scrim").onclick = () => {
+  if (Date.now() - sheetOpenedAt < 700) return;
+  if (voice.phase !== "recording" && voice.phase !== "transcribing") closeSheet();
+};
+
+// ---------- routing ----------
+function route() {
+  const h = location.hash;
+  clearTimeout(timer);
+  if (!$("sheetWrap").hidden && voice.phase === "idle") closeSheet();
+  const m = h.match(/^#\/t\/(thr_[a-z0-9]+)/);
+  if (!m || m[1] !== state.thread?.id) closeThreadTray();
+  // Only switch screens when the screen actually changes. Hiding the current
+  // one first (even for an instant) collapses the page, and the browser then
+  // resets the scroll to the top: that was threads "jumping to the top"
+  // every time you came back to Pocket from another app.
+  const target = m ? "thread" : h === "#/new" ? "new" : h === "#/artifacts" ? "artifacts" : h.startsWith("#/tell") ? "tell"
+    : h === "#/shortcut" ? "shortcut" : h === "#/walk" ? "walk" : h === "#/drafts" ? "drafts" : "home";
+  for (const id of ["home", "thread", "new", "artifacts", "walk", "tell", "shortcut", "drafts"]) if ((id !== target) !== $(id).hidden) $(id).hidden = id !== target;
+  $("dock").hidden = target !== "home";
+  if (pillSend) { clearTimeout(pillSend.timer); pillSend.restore(); pillSend = null; $("pills").dataset.key = ""; }
+  if (m) {
+    $("thread").hidden = false;
+    const opening = state.thread?.id !== m[1];
+    if (opening) {
+      state.thread = null;
+      $("messages").innerHTML = "";
+      $("messages").dataset.count = "0";
+      $("newDot").hidden = true;
+      $("cards").innerHTML = "";
+      $("cards").dataset.key = "";
+      $("pills").innerHTML = "";
+      $("pills").dataset.key = "";
+      $("tTitle").textContent = "";
+      $("tSub").textContent = "";
+    }
+    // Scroll to the latest only when a thread is opened, not on every revisit.
+    loadThread(m[1], opening);
+    if (opening) refreshTrayCount(m[1]);
+  } else if (h === "#/new") {
+    $("new").hidden = false;
+    if (state.draft) { $("prompt").value = state.draft; state.draft = ""; }
+    renderNew();
+  } else if (h === "#/artifacts") {
+    $("artifacts").hidden = false;
+    loadArtifacts();
+  } else if (h.startsWith("#/tell")) {
+    // Take the text and key out of the address at once, so a reload or the
+    // back button can never send it twice.
+    const q = new URLSearchParams(h.split("?")[1] || "");
+    if (q.has("t")) { state.tell = { key: q.get("k") || "", text: (q.get("t") || "").trim() }; history.replaceState(null, "", location.pathname + "#/tell"); }
+    if (!state.tell?.text) { location.replace("#"); return; }
+    // A Shortcut link can arrive while a sheet is open from before; it must
+    // never count down hidden underneath one.
+    if (!$("sheetWrap").hidden && voice.phase !== "recording" && voice.phase !== "transcribing") closeSheet();
+    $("tell").hidden = false;
+    runTell();
+  } else if (h === "#/drafts") {
+    $("drafts").hidden = false;
+    loadDrafts(true);
+  } else if (h === "#/shortcut") {
+    $("shortcut").hidden = false;
+    renderSetup();
+  } else if (h === "#/walk") {
+    $("walk").hidden = false;
+    renderWalk();
+  } else {
+    $("home").hidden = false;
+    $("dock").hidden = false;
+    sawHome = true;
+    loadHome();
+  }
+}
+window.addEventListener("hashchange", route);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !recorder.active && location.hash !== "#/walk") route(); });
+// Back pops history when we got here from the list; opened directly on a
+// view (a shared link, a home-screen resume), it goes to the list instead.
+let sawHome = false;
+document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => {
+  if (sawHome) history.back(); else location.replace("#");
+}));
+
+// ---------- home ----------
+async function loadHome() {
+  // Drafts are slower (Gmail round trips) and change rarely; refresh them
+  // separately so the thread list never waits on them.
+  if (!state.draftsAt || Date.now() - state.draftsAt > 60000) {
+    state.draftsAt = Date.now();
+    rpc("drafts", {}).then((d) => { state.drafts = d; if (!$("home").hidden && !state.swiping && state.home) renderHome(); }).catch(() => {});
+  }
+  try {
+    state.home = await rpc("home");
+    if (!state.swiping && !pillSend) renderHome();
+  } catch (e) {
+    if (!state.home) $("lists").innerHTML = `<div class="fail">Couldn't reach bb.<br>${esc(e.message)}</div>`;
+    else $("summary").innerHTML = `<span class="offline">Offline</span> · showing the last list`;
+  }
+  schedule(loadHome, 8000, "home");
+}
+
+function rowHtml(t, quiet, needs = false) {
+  const k = kindOf(t);
+  const why = k === "question" ? `<span class="why">Waiting on you</span> · `
+    : k === "error" ? `<span class="why error">Stopped with an error</span> · `
+    : t.unread && k !== "working" ? `<span class="why unread">New</span> · ` : "";
+  const isMgr = t.id === state.home?.managerId;
+  const tag = isMgr ? `<span class="tag mgrtag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>Manager</span>` : "";
+  const host = machineById(t.hostId);
+  const offline = host && !host.online ? `<span class="why error">${esc(shortMachine(host.name))} offline</span> · ` : "";
+  const lead = t.rec?.stake || t.preview;
+  const preview = lead ? `<div class="preview">${esc(lead)}</div>` : "";
+  const rec = t.rec ? `<div class="homerec"><button class="pill2 rec" data-rec="${t.id}"><span>${esc(t.rec.label)}</span></button><span class="why2">${esc(t.rec.reason)}</span></div>` : "";
+  return `<li data-id="${t.id}"${needs ? ` data-needs="1"` : ""}>
+    <div class="act read"><span class="s1">${t.unread ? "Mark read" : "Mark unread"}</span><span class="s2">Dismiss</span></div>
+    <div class="act pin">${t.pinned ? "Unpin" : "Pin"}</div>
+    <a class="row${quiet ? " quiet" : ""}" href="#/t/${t.id}" draggable="false">
+    <span class="dot ${k === "idle" && t.unread ? "reply" : k}"></span>
+    <span><div class="title">${esc(t.title)}</div>${preview}${rec}
+    <div class="meta">${tag}${offline}${why}${esc(t.projectName)} · ${ago(t.updatedAt)}</div></span></a></li>`;
+}
+
+function renderHome() {
+  const all = state.home.threads;
+  const pinned = all.filter((t) => t.pinned);
+  const rest0 = all.filter((t) => !t.pinned);
+  // Needs you = a question is waiting, or something new you haven't read.
+  const needs = rest0.filter((t) => !t.dismissed && (t.pending || t.rec || (t.unread && !isWorking(t.status))));
+  needs.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
+  const working = rest0.filter((t) => !t.pending && isWorking(t.status));
+  const rest = rest0.filter((t) => !needs.includes(t) && !working.includes(t));
+  const shownRest = state.showAll ? rest.slice(0, 80) : rest.slice(0, 8);
+
+  const waiting = all.filter((t) => !t.dismissed && (t.pending || t.rec || (t.unread && !isWorking(t.status)))).length;
+  const bits = [];
+  if (waiting) bits.push(`${waiting} need${waiting === 1 ? "s" : ""} you`);
+  const busy = all.filter((t) => isWorking(t.status)).length;
+  if (busy) bits.push(`${busy} working`);
+  $("summary").textContent = bits.length ? bits.join(" · ") : "All clear.";
+
+  const parts = [];
+  const dc = draftCount();
+  if (dc.fresh || dc.older) parts.push(`<a class="draftsrow" href="#/drafts">✉️ <span>${dc.fresh ? `<b>${dc.fresh} draft${dc.fresh === 1 ? "" : "s"}</b> waiting to send` : `${dc.older} older draft${dc.older === 1 ? "" : "s"}`}</span><span class="go">›</span></a>`);
+  if (pinned.length) parts.push(`<h2 class="section">Pinned</h2><ul class="list">${pinned.map((t) => rowHtml(t)).join("")}</ul>`);
+  parts.push(`<h2 class="section">Needs you</h2>`);
+  if (needs.length && !localStorage.getItem("pocket.dismissHint")) parts.push(`<div class="hint">Swipe left: read, keep going to dismiss · right: pin</div>`);
+  parts.push(needs.length ? `<ul class="list">${needs.map((t) => rowHtml(t, false, true)).join("")}</ul>` : `<div class="empty">Nothing right now.</div>`);
+  if (working.length) parts.push(`<h2 class="section">Working</h2><ul class="list">${working.map((t) => rowHtml(t, true)).join("")}</ul>`);
+  if (rest.length) {
+    parts.push(`<h2 class="section">Earlier</h2><ul class="list">${shownRest.map((t) => rowHtml(t, true)).join("")}</ul>`);
+    if (rest.length > shownRest.length) parts.push(`<button class="more" id="moreBtn">Show more</button>`);
+  }
+  parts.push(`<a class="setuplink" href="#/shortcut">Talk to bb from Siri or the Action Button →</a>`);
+  $("lists").innerHTML = parts.join("");
+  $("lists").querySelectorAll("li[data-id]").forEach(attachSwipe);
+  $("lists").querySelectorAll("[data-rec]").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const t = threadById(b.dataset.rec);
+      if (!t?.rec) return;
+      armPill(b, { threadId: t.id, text: t.rec.text, label: t.rec.label, recommended: true, stale: true, source: "home", after: () => loadHome() });
+    });
+  });
+  const more = $("moreBtn");
+  if (more) more.onclick = () => { state.showAll = true; renderHome(); };
+
+  // Walk needs the Talk to BB plugin; without it there's no button.
+  $("talkBtn").hidden = !state.home.walk && walk.phase === "idle";
+  // A Walk call keeps running while you look around; say so.
+  $("talkBtn").lastChild.textContent = walk.phase === "idle" ? "Walk" : "● Live";
+  $("talkBtn").style.color = walk.phase === "idle" ? "" : "var(--green)";
+  renderMachineLine();
+  const n = state.home.newArtifacts;
+  $("artBadge").hidden = !n;
+  $("artBadge").textContent = n > 99 ? "99+" : String(n);
+  const mgr = threadById(state.home.managerId);
+  dockHint();
+}
+const rank = (t) => ({ question: 0, error: 1, reply: 2 }[kindOf(t)] ?? 3);
+
+// Swipe: left toggles read, right toggles pin. Past ~28% of the width the
+// action arms; releasing commits it. Vertical drags stay scrolls.
+function attachSwipe(li) {
+  const row = li.querySelector(".row");
+  const id = li.dataset.id;
+  let x0 = 0, y0 = 0, dx = 0, tracking = false, decided = false, horizontal = false, swallowClick = false, hold = 0;
+  const cancelHold = () => { clearTimeout(hold); row.classList.remove("rowhold"); };
+  row.addEventListener("contextmenu", (e) => e.preventDefault());
+  row.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    x0 = e.clientX; y0 = e.clientY; dx = 0; tracking = true; decided = false; horizontal = false;
+    row.classList.remove("settle");
+    // Long press (finger still for ~0.5 s): the row's menu.
+    row.classList.add("rowhold");
+    hold = setTimeout(() => { row.classList.remove("rowhold"); tracking = false; swallowClick = true; rowMenu(id, !!li.dataset.needs); }, 500);
+  });
+  row.addEventListener("pointerup", cancelHold);
+  row.addEventListener("pointercancel", cancelHold);
+  row.addEventListener("pointerleave", cancelHold);
+  row.addEventListener("pointermove", (e) => {
+    if (!tracking) return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!decided && (Math.abs(mx) > 8 || Math.abs(my) > 8)) {
+      decided = true;
+      cancelHold();
+      horizontal = Math.abs(mx) > Math.abs(my) * 1.2;
+      if (horizontal) { try { row.setPointerCapture(e.pointerId); } catch {} state.swiping = true; }
+      else tracking = false;
+    }
+    if (!horizontal) return;
+    dx = mx;
+    row.style.transform = `translateX(${dx}px)`;
+    li.dataset.dir = dx < 0 ? "left" : "right";
+    li.classList.toggle("armed", Math.abs(dx) > li.offsetWidth * 0.28);
+    // Needs you only: keep pulling left past ~60% and it becomes Dismiss.
+    li.classList.toggle("far", !!li.dataset.needs && dx < -li.offsetWidth * 0.6);
+  });
+  const finish = () => {
+    if (!tracking) return;
+    tracking = false;
+    if (!horizontal) return;
+    swallowClick = true;
+    const armed = li.classList.contains("armed");
+    const far = li.classList.contains("far");
+    if (far) {
+      // Slide it the rest of the way out, collapse the row, then dismiss.
+      row.classList.add("settle");
+      row.style.transform = `translateX(${-li.offsetWidth}px)`;
+      li.style.height = `${li.offsetHeight}px`;
+      requestAnimationFrame(() => { li.classList.add("leaving"); li.style.height = "0px"; });
+      setTimeout(() => { state.swiping = false; dismissThread(id); }, 240);
+      return;
+    }
+    row.classList.add("settle");
+    row.style.transform = "";
+    setTimeout(() => { li.classList.remove("armed", "far"); delete li.dataset.dir; state.swiping = false; }, 230);
+    if (armed) (dx < 0 ? toggleRead : togglePin)(id);
+  };
+  row.addEventListener("pointerup", finish);
+  row.addEventListener("pointercancel", finish);
+  row.addEventListener("click", (e) => { if (swallowClick) { e.preventDefault(); swallowClick = false; } });
+}
+
+// Dismiss: out of Needs you until the agent says something new. Undo puts it back.
+async function dismissThread(id) {
+  const t = threadById(id);
+  if (!t) return;
+  const wasUnread = t.unread;
+  localStorage.setItem("pocket.dismissHint", "1");
+  t.dismissed = true; t.unread = false; t.rec = null;
+  renderHome();
+  undoToast("Dismissed", async () => {
+    t.dismissed = false; t.unread = wasUnread;
+    renderHome();
+    try { await rpc("dismiss", { threadId: id, undo: true, wasUnread }); } catch (e) { toast(e.message); }
+    loadHome();
+  });
+  try { await rpc("dismiss", { threadId: id }); } catch (e) { toast(e.message); t.dismissed = false; renderHome(); }
+}
+
+// Long-press menu on a home row.
+function rowMenu(id, inNeeds) {
+  const t = threadById(id);
+  if (!t) return;
+  const items = [
+    `<button data-a="rename">Rename</button>`,
+    `<button data-a="pin">${t.pinned ? "Unpin" : "Pin to top"}</button>`,
+    `<button data-a="read">${t.unread ? "Mark read" : "Mark unread"}</button>`,
+    t.id === state.home.managerId
+      ? (state.home.managerChosen ? `<button data-a="unmanager">Stop using as manager (back to automatic)</button>` : "")
+      : `<button data-a="manager">Make this the manager (voice goes here)</button>`,
+    inNeeds ? `<button data-a="dismiss">Dismiss from Needs you</button>` : "",
+    `<a href="${fullUrl(t)}">Open in full bb</a>`,
+    `<button data-close>Cancel</button>`,
+  ].join("");
+  const sheet = openSheet(`<div class="menu"><div class="hint" style="margin:0 12px 6px">${esc(t.title)}</div>${items}</div>`);
+  sheet.querySelectorAll("[data-a]").forEach((b) => b.onclick = () => {
+    closeSheet();
+    const a = b.dataset.a;
+    if (a === "rename") renameThread(id, t.title);
+    if (a === "pin") togglePin(id);
+    if (a === "read") toggleRead(id);
+    if (a === "dismiss") dismissThread(id);
+    if (a === "manager" || a === "unmanager") setManager(a === "manager" ? id : null);
+  });
+  sheet.querySelectorAll("[data-close]").forEach((b) => b.onclick = closeSheet);
+}
+
+// The manager is where the big mic (and the Shortcut) sends.
+async function setManager(id) {
+  const prev = { id: state.home.managerId, chosen: state.home.managerChosen };
+  if (id) { state.home.managerId = id; state.home.managerChosen = true; }
+  renderHome();
+  try {
+    await rpc("setManager", { threadId: id });
+    toast(id ? "Voice now goes here" : "Manager back to automatic");
+    loadHome();
+  } catch (e) { Object.assign(state.home, { managerId: prev.id, managerChosen: prev.chosen }); renderHome(); toast(e.message); }
+}
+
+// Rename asks the AI straight away (that's what you want ~90% of the time),
+// so one tap on Save usually finishes. Undo puts the original name back (and
+// closes when there's nothing to undo); the sparkle makes a fresh suggestion.
+// Typing wins: a suggestion never overwrites text you have started editing.
+function renameThread(id, current) {
+  const original = current || "";
+  const sheet = openSheet(`<div class="voice renamebox"><h3 style="margin:4px 4px 2px">Rename thread</h3>
+    <input id="renameInput" value="${esc(original)}" maxlength="200" enterkeyhint="done">
+    <div class="hint" id="renameNote" style="margin:4px 4px 0;min-height:1.3em"></div>
+    <div class="btns"><button class="btn" id="renameUndo">Undo</button><button class="btn aibtn" id="renameAI" aria-label="New suggestion"><svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9zM5 15l.7 1.8 1.8.7-1.8.7L5 20l-.7-1.8-1.8-.7 1.8-.7z"/></svg><span>Again</span></button><button class="btn primary" id="renameSave">Save</button></div></div>`);
+  const input = sheet.querySelector("#renameInput");
+  const note = sheet.querySelector("#renameNote");
+  const ai = sheet.querySelector("#renameAI");
+  let edited = false, seq = 0;
+  input.addEventListener("input", () => { edited = true; });
+
+  const suggest = async () => {
+    const mine = ++seq;
+    ai.disabled = true; ai.classList.add("thinking");
+    note.textContent = "Suggesting a name…";
+    try {
+      const { title } = await rpc("suggestTitle", { threadId: id });
+      if (mine !== seq || !sheet.isConnected || !$("renameInput")) return;
+      if (edited) { note.textContent = `Suggestion: ${title}`; }
+      else { input.value = title; note.textContent = ""; }
+    } catch (e) { if (mine === seq) note.textContent = e.message; }
+    if (mine === seq) { ai.disabled = false; ai.classList.remove("thinking"); }
+  };
+
+  const save = async () => {
+    const title = input.value.trim();
+    seq++; // a late suggestion must not land after saving
+    if (!title || title === original) return closeSheet();
+    closeSheet();
+    for (const t of [threadById(id), state.thread?.id === id ? state.thread : null]) if (t) t.title = title;
+    if (!$("home").hidden) renderHome();
+    if (state.thread?.id === id) $("tTitle").textContent = title;
+    try { await rpc("rename", { threadId: id, title }); toast("Renamed"); } catch (e) { toast(e.message); }
+  };
+
+  sheet.querySelector("#renameSave").onclick = save;
+  ai.addEventListener("pointerdown", (e) => e.preventDefault());
+  ai.onclick = () => { edited = false; suggest(); };
+  sheet.querySelector("#renameUndo").onclick = () => {
+    if (input.value !== original) { seq++; input.value = original; edited = true; note.textContent = ""; ai.disabled = false; ai.classList.remove("thinking"); }
+    else { seq++; closeSheet(); }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } });
+  suggest();
+}
+
+async function toggleRead(id) {
+  const t = threadById(id) || (state.thread?.id === id ? state.thread : null);
+  if (!t) return;
+  const read = t.unread;
+  localStorage.setItem("pocket.swipeHint", "1");
+  t.unread = !read;
+  if (state.thread?.id === id) state.thread.unread = !read;
+  setTimeout(() => { if (!$("home").hidden) renderHome(); else if (state.thread?.id === id) renderThreadHead(); }, 240);
+  try { await rpc("setRead", { threadId: id, read }); }
+  catch (e) { t.unread = read; toast(e.message); if (!$("home").hidden) renderHome(); }
+}
+
+async function togglePin(id) {
+  const t = threadById(id) || (state.thread?.id === id ? state.thread : null);
+  if (!t) return;
+  const pinned = !t.pinned;
+  localStorage.setItem("pocket.swipeHint", "1");
+  t.pinned = pinned;
+  if (state.thread?.id === id) state.thread.pinned = pinned;
+  toast(pinned ? "Pinned" : "Unpinned");
+  setTimeout(() => { if (!$("home").hidden) renderHome(); }, 240);
+  try { await rpc("setPinned", { threadId: id, pinned }); if (!$("home").hidden) loadHome(); }
+  catch (e) { t.pinned = !pinned; toast(e.message); if (!$("home").hidden) renderHome(); }
+}
+
+$("newBtn").onclick = () => { location.hash = "#/new"; };
+$("artBtn").onclick = () => { location.hash = "#/artifacts"; };
+$("talkBtn").onclick = () => { location.hash = "#/walk"; };
+
+// ---------- hold to talk ----------
+// Press: recording starts. Release: transcribe and review. Slide up onto the
+// lock: it keeps recording hands-free until Done. Slide left: cancel.
+const LOCK_DY = 90, CANCEL_DX = 100, MIN_SECS = 0.5;
+const hold = { active: false, locked: false, released: false, starting: false, cancel: false, armed: false, x0: 0, y0: 0 };
+
+// Safari has no vibrate(). Toggling a switch-style checkbox is the one haptic
+// it exposes (iOS 18+), and only while a finger is going down or lifting, so
+// call this synchronously from pointerdown/pointerup, never after an await.
+function buzz() {
+  try { if (navigator.vibrate) { navigator.vibrate(12); return; } } catch {}
+  try {
+    const label = document.createElement("label");
+    label.ariaHidden = "true";
+    label.style.display = "none";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("switch", "");
+    label.appendChild(input);
+    document.head.appendChild(label);
+    label.click();
+    label.remove();
+  } catch {}
+}
+
+// ---------- sound cues ----------
+// Short tones for the mic (Safari gives web pages no haptics). They are
+// synthesized, so there are no files, and quiet enough not to startle.
+// iOS only lets audio start after a tap, so the first tap primes the player;
+// until then the first cue of a page load may be silent. Between cues the
+// player is suspended: a running (even silent) one counts as media playing,
+// and iOS would stop Spotify for it.
+const cues = {
+  ctx: null, primed: false, idle: 0,
+  unlock() {
+    try {
+      this.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
+      if (this.ctx.state !== "running") this.ctx.resume().catch(() => {});
+      this.primed = true;
+      this.sleepSoon();
+    } catch {}
+  },
+  sleepSoon(ms = 250) {
+    clearTimeout(this.idle);
+    this.idle = setTimeout(() => { if (this.ctx?.state === "running") this.ctx.suspend().catch(() => {}); }, ms);
+  },
+  tone(freqs, { dur = 0.07, gap = 0.015, gain = 0.16, type = "sine" } = {}) {
+    this.unlock();
+    const c = this.ctx;
+    if (!c) return;
+    this.sleepSoon(Math.ceil((freqs.length * (dur + gap) + 0.3) * 1000));
+    let t = c.currentTime + 0.01;
+    for (const f of freqs) {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(c.destination);
+      o.start(t);
+      o.stop(t + dur + 0.02);
+      t += dur + gap;
+    }
+  },
+  start() { this.tone([660, 990]); },
+  lock() { this.tone([1180, 1180], { dur: 0.04, gap: 0.05 }); },
+  stop() { this.tone([990, 660]); },
+  cancel() { this.tone([330, 247], { dur: 0.09, gain: 0.12, type: "triangle" }); },
+};
+// Prime once, on the first tap, and never again: re-arming on every tap would
+// claim the phone's audio on every tap.
+const primeCues = () => {
+  cues.unlock();
+  for (const ev of ["touchend", "click"]) document.removeEventListener(ev, primeCues, true);
+};
+for (const ev of ["touchend", "click"]) document.addEventListener(ev, primeCues, { passive: true, capture: true });
+
+// Safari asks for the mic once per page load. That prompt used to land in the
+// middle of the first hold and swallow the release, so until the mic has been
+// granted in this page the first press only turns it on.
+let micReady = false;
+function dockHint() {
+  const mgr = threadById(state.home?.managerId);
+  $("dockTo").textContent = !micReady ? "Tap the mic once to turn it on"
+    : mgr ? `Hold to talk to ${mgr.title}` : "Hold to talk · no manager thread found, you'll pick where it goes";
+}
+navigator.permissions?.query({ name: "microphone" }).then((p) => {
+  micReady = p.state === "granted";
+  p.onchange = () => { micReady = micReady || p.state === "granted"; dockHint(); };
+  dockHint();
+}).catch(() => {});
+async function warmMic() {
+  try {
+    await recorder.open();
+    recorder.keepWarm();
+    micReady = true;
+    dockHint();
+    toast("Mic's on. Hold to talk.");
+  } catch (e) { toast(micError(e)); }
+}
+
+function voiceTick(secs, lvl) {
+  const h = $("hClock"); if (h) h.textContent = mmss(secs);
+  const c = $("vClock"); if (c) c.textContent = mmss(secs);
+  const o = $("vOrb"); if (o) o.style.setProperty("--lvl", lvl.toFixed(2));
+  $("micBtn").style.setProperty("--lvl", lvl.toFixed(2));
+  if (secs > 600) finishVoice();
+}
+
+function holdUi(on) {
+  $("hold").hidden = !on;
+  $("micBtn").classList.toggle("holding", on);
+  if (!on) { $("hold").classList.remove("armed", "cancel"); $("hold").style.removeProperty("--up"); }
+}
+
+const micBtn = $("micBtn");
+micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+micBtn.addEventListener("pointerdown", async (e) => {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  // A hold whose release never arrived (an OS sheet, a notification): this
+  // press ends it instead of doing nothing.
+  if (hold.active && !hold.locked) { releaseMic(); return; }
+  if (voice.phase !== "idle" || recorder.active) return;
+  e.preventDefault();
+  if (!micReady) { cues.unlock(); warmMic(); return; }
+  buzz();
+  cues.unlock();
+  try { micBtn.setPointerCapture(e.pointerId); } catch {}
+  Object.assign(hold, { active: true, locked: false, released: false, starting: true, cancel: false, armed: false, x0: e.clientX, y0: e.clientY });
+  voice.target = state.home?.managerId || null;
+  voice.text = "";
+  voice.phase = "recording";
+  $("hHint").textContent = recorder.live() ? "Release to finish" : "Starting mic…";
+  holdUi(true);
+  try {
+    await recorder.start(voiceTick);
+    // The start sound means "recording now", so talk after it, not at the press.
+    if (hold.active || hold.locked) { cues.start(); if (!hold.armed && !hold.cancel) $("hHint").textContent = "Release to finish"; }
+  } catch (err) {
+    hold.active = false; voice.phase = "idle"; holdUi(false);
+    toast(micError(err));
+    return;
+  }
+  hold.starting = false;
+  micReady = true;
+  // Let go while the mic was still starting (the first-time permission
+  // prompt steals the press): nothing useful was recorded.
+  if (hold.released && !hold.locked) {
+    recorder.cancel(); voice.phase = "idle"; holdUi(false); cues.cancel();
+    toast("Mic's ready. Hold it while you talk.");
+  }
+});
+micBtn.addEventListener("pointermove", (e) => {
+  if (!hold.active || hold.locked) return;
+  const dx = e.clientX - hold.x0, dy = e.clientY - hold.y0;
+  const up = Math.max(0, Math.min(1, -dy / LOCK_DY));
+  $("hold").style.setProperty("--up", up.toFixed(2));
+  hold.cancel = dx < -CANCEL_DX && up < 0.5;
+  $("hold").classList.toggle("cancel", hold.cancel);
+  hold.armed = up >= 1;
+  $("hold").classList.toggle("armed", hold.armed);
+  $("hHint").textContent = hold.cancel ? "Release to cancel" : hold.armed ? "Release to lock" : up > 0.2 ? "Slide up to lock" : "Release to finish";
+});
+function releaseMic() {
+  if (!hold.active) return;
+  hold.active = false;
+  hold.released = true;
+  if (hold.locked) return;
+  if (hold.armed && !hold.starting) { lockVoice(); return; }
+  holdUi(false);
+  if (hold.starting) return; // handled when start resolves
+  buzz();
+  if (hold.cancel) { recorder.cancel(); voice.phase = "idle"; cues.cancel(); toast("Cancelled"); return; }
+  if ((Date.now() - recorder.started) / 1000 < MIN_SECS) {
+    recorder.cancel(); voice.phase = "idle"; cues.cancel();
+    toast("Hold to talk · slide up to lock for a longer note");
+    return;
+  }
+  finishVoice();
+  cues.stop();
+}
+micBtn.addEventListener("pointerup", releaseMic);
+document.addEventListener("visibilitychange", () => { if (document.hidden && hold.active && !hold.locked) releaseMic(); });
+micBtn.addEventListener("pointercancel", releaseMic);
+
+function lockVoice() {
+  hold.locked = true;
+  buzz();
+  cues.lock();
+  holdUi(false);
+  openRecordingSheet("Locked. Talk as long as you like, then tap Done.");
+}
+
+// ---------- voice to the manager ----------
+const voice = { phase: "idle", target: null, text: "" };
+
+function targetLabel(id) {
+  if (id === "new") return { who: "New thread", sub: "Pick a project next" };
+  const t = threadById(id);
+  if (!t) return { who: "Choose where to send", sub: "" };
+  return { who: t.title, sub: t.manager ? "Manager" : t.projectName };
+}
+
+function toButton() {
+  const l = targetLabel(voice.target);
+  return `<button class="to" id="vTo"><span>To</span><b>${esc(l.who)}</b><span>Change</span></button>`;
+}
+
+function openRecordingSheet(note) {
+  const sheet = openSheet(`<div class="voice">${toButton()}
+    <div class="stage"><div class="orb" id="vOrb">${ICON_MIC}</div><div class="clock" id="vClock">${recorder.active ? mmss((Date.now() - recorder.started) / 1000) : "0:00"}</div><div class="note" id="vNote">${esc(note)}</div></div>
+    <div class="btns"><button class="btn" id="vCancel">Cancel</button><button class="btn primary" id="vDone">Done</button></div></div>`);
+  wireVoiceCommon(sheet);
+  sheet.querySelector("#vCancel").onclick = () => { if (voice.phase === "recording") cues.cancel(); closeSheet(); };
+  sheet.querySelector("#vDone").onclick = () => { finishVoice(); cues.stop(); };
+}
+
+// Hands-free recording from the review sheet's Re-record.
+async function startVoice() {
+  if (voice.phase !== "idle") return;
+  voice.text = "";
+  voice.phase = "recording";
+  openRecordingSheet("Starting mic…");
+  try {
+    await recorder.start(voiceTick);
+    cues.start();
+    if ($("vNote")) $("vNote").textContent = "Listening. Tap Done when you're finished.";
+    buzz();
+  } catch (e) {
+    voice.phase = "idle";
+    closeSheet();
+    toast(micError(e));
+  }
+}
+
+function wireVoiceCommon(sheet) {
+  const to = sheet.querySelector("#vTo");
+  if (to) to.onclick = pickTarget;
+}
+
+async function finishVoice() {
+  if (voice.phase !== "recording") return;
+  voice.phase = "transcribing";
+  // A released hold has no sheet yet; show one straight into "Transcribing".
+  if (!$("vOrb")) openSheet(`<div class="voice"><div class="stage"><div class="orb busy" id="vOrb">${ICON_MIC}</div><div class="note" id="vNote">Transcribing…</div></div></div>`);
+  $("vOrb").classList.add("busy");
+  $("vNote").textContent = "Transcribing…";
+  if ($("vDone")) $("vDone").disabled = true;
+  if ($("vCancel")) $("vCancel").disabled = true;
+  const blob = await recorder.stop();
+  try {
+    voice.text = await transcribe(blob);
+    showReview();
+  } catch (e) {
+    voice.phase = "idle";
+    closeSheet();
+    toast(e.message);
+  }
+}
+
+function showReview() {
+  voice.phase = "review";
+  const sheet = openSheet(`<div class="voice">${toButton()}
+    <textarea id="vText">${esc(voice.text)}</textarea>
+    <div class="btns"><button class="btn" id="vAgain">Re-record</button><button class="btn primary" id="vSend">${voice.target === "new" ? "Continue" : "Send"}</button></div></div>`);
+  wireVoiceCommon(sheet);
+  const ta = sheet.querySelector("#vText");
+  ta.oninput = () => { voice.text = ta.value; };
+  sheet.querySelector("#vAgain").onclick = () => { voice.phase = "idle"; startVoice(); };
+  sheet.querySelector("#vSend").onclick = sendVoice;
+}
+
+async function sendVoice() {
+  const text = voice.text.trim();
+  if (!text) return;
+  if (!voice.target) return pickTarget();
+  if (voice.target === "new") {
+    state.draft = text;
+    voice.phase = "idle";
+    closeSheet();
+    location.hash = "#/new";
+    return;
+  }
+  const id = voice.target;
+  const btn = $("vSend");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await rpc("send", { threadId: id, text });
+    voice.phase = "idle";
+    closeSheet();
+    toast(r.delivery === "queued" ? "Queued for when it's free" : `Sent to ${targetLabel(id).who}`);
+    location.hash = `#/t/${id}`;
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast(e.message);
+  }
+}
+
+function pickTarget() {
+  const back = voice.phase;
+  const all = state.home?.threads || [];
+  const isMgr = (t) => t.manager || t.id === state.home?.managerId;
+  const managers = all.filter(isMgr).sort((a, b) => (b.id === state.home?.managerId) - (a.id === state.home?.managerId) || b.updatedAt - a.updatedAt);
+  const pinned = all.filter((t) => t.pinned && !isMgr(t));
+  const recent = all.filter((t) => !isMgr(t) && !t.pinned).slice(0, 8);
+  const item = (t) => `<li><button data-t="${t.id}" class="${t.id === voice.target ? "on" : ""}"><div>${esc(t.title)}</div><div class="sub">${t.manager ? "Manager · " : ""}${esc(t.projectName)} · ${ago(t.updatedAt)}</div></button></li>`;
+  const group = (name, list) => list.length ? `<h3>${name}</h3><ul class="picklist">${list.map(item).join("")}</ul>` : "";
+  // The recording keeps running under the picker, so changing target mid-sentence is fine.
+  const holder = document.createElement("div");
+  holder.className = "voice";
+  holder.innerHTML = `${group("Managers", managers)}${group("Pinned", pinned)}${group("Recent", recent)}
+    <h3>Or</h3><ul class="picklist"><li><button data-t="new"><div>Start a new thread</div><div class="sub">Pick a project next</div></button></li></ul>`;
+  const saved = $("sheet").innerHTML;
+  $("sheet").innerHTML = `<div class="grab"></div>`;
+  $("sheet").appendChild(holder);
+  holder.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => {
+    voice.target = b.dataset.t;
+    if (back === "review") return showReview();
+    $("sheet").innerHTML = saved;
+    const to = $("vTo");
+    if (to) to.outerHTML = toButton();
+    wireVoiceCommon($("sheet"));
+    $("vCancel").onclick = closeSheet;
+    $("vDone").onclick = finishVoice;
+  });
+}
+
+// ---------- thread ----------
+async function loadThread(id, first) {
+  try {
+    const t = await rpc("thread", { threadId: id });
+    if (location.hash !== `#/t/${id}`) return;
+    const changed = JSON.stringify(t) !== JSON.stringify(state.thread);
+    state.thread = t;
+    if (changed) renderThread(first);
+  } catch (e) {
+    if (!state.thread) $("messages").innerHTML = `<div class="fail">Couldn't load this thread.<br>${esc(e.message)}</div>`;
+  }
+  const t = state.thread;
+  const fast = t && (isWorking(t.status) || t.interactions.length);
+  schedule(() => loadThread(id, false), fast ? 3000 : 10000, `#/t/${id}`);
+}
+
+function renderThreadHead() {
+  const t = state.thread;
+  $("tTitle").textContent = t.title;
+  const st = t.interactions.length ? `<span class="wait">waiting on you</span>`
+    : isWorking(t.status) ? `<span class="live">working</span>`
+    : t.status === "error" ? `<span class="err">error</span>` : "idle";
+  const mach = t.machine ? `<span${t.machine.online ? "" : ` style="color:var(--red)"`}>${esc(shortMachine(t.machine.name))}${t.machine.online ? "" : " offline"}</span>` : "";
+  $("tSub").innerHTML = `<button class="tapsub" id="execBtn">${esc(t.projectName)}${mach ? ` · ${mach}` : ""}</button> · ${st}${t.unread ? `<button class="mark" id="markRead">Mark read</button>` : ""}`;
+  $("execBtn").onclick = execSheet;
+  const mr = $("markRead");
+  if (mr) mr.onclick = () => toggleRead(t.id);
+}
+
+// ---------- jump to latest ----------
+function updateJump() {
+  const btn = $("toBottom");
+  if ($("thread").hidden) { btn.hidden = true; return; }
+  const composer = document.querySelector("#thread .composer");
+  btn.style.setProperty("--jump-b", `${(composer?.getBoundingClientRect().height || 90) + 12}px`);
+  const fromBottom = document.body.scrollHeight - (window.scrollY + window.innerHeight);
+  btn.hidden = fromBottom < 500;
+  if (fromBottom < 150) $("newDot").hidden = true;
+}
+$("toBottom").onclick = () => {
+  $("newDot").hidden = true;
+  // Smooth over a screen or two; a long thread jumps, or it takes seconds.
+  const far = document.body.scrollHeight - (window.scrollY + window.innerHeight) > 2500;
+  window.scrollTo({ top: document.body.scrollHeight, behavior: far ? "instant" : "smooth" });
+};
+window.addEventListener("scroll", updateJump, { passive: true });
+window.addEventListener("resize", updateJump);
+
+function renderThread(first) {
+  const t = state.thread;
+  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+  const hadCount = Number($("messages").dataset.count || 0);
+  renderThreadHead();
+  syncModelChip();
+  const html = [];
+  if (t.messages.length >= 40) html.push(`<div class="older">Earlier messages are in full bb</div>`);
+  for (const m of t.messages) {
+    if (m.role === "user") {
+      const long = m.text.length > 600 || m.text.split("\n").length > 8;
+      html.push(`<div class="msg user"><div><div class="bubble${long ? " long" : ""}">${esc(m.text)}</div><div class="when">${clock(m.at)}</div></div></div>`);
+    } else {
+      html.push(`<div class="msg assistant"><div class="md">${md(m.text)}</div><div class="when">${clock(m.at)}</div></div>`);
+    }
+  }
+  if (isWorking(t.status) && !t.interactions.length) html.push(`<div class="working"><span class="dot working" style="margin:0"></span>Working…</div>`);
+  if (t.status === "error") html.push(`<div class="working" style="color:var(--red)">The last turn stopped with an error. Reply to try again, or open it in full bb.</div>`);
+  $("messages").innerHTML = html.join("");
+  $("messages").querySelectorAll(".bubble.long").forEach((b) => b.addEventListener("click", () => b.classList.remove("long"), { once: true }));
+  renderCards(t);
+  loadPills(t);
+  $("messages").dataset.count = String(t.messages.length);
+  if (first || nearBottom) requestAnimationFrame(() => { window.scrollTo(0, document.body.scrollHeight); updateJump(); });
+  else {
+    // Something new arrived while you were reading further up: mark the button.
+    if (t.messages.length > hadCount && hadCount > 0) $("newDot").hidden = false;
+    requestAnimationFrame(updateJump);
+  }
+}
+
+function renderCards(t) {
+  const box = $("cards");
+  // Don't wipe a half-answered card on a poll.
+  const key = t.interactions.map((i) => i.id).join(",");
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.innerHTML = "";
+  for (const i of t.interactions) box.appendChild(i.kind === "approval" ? approvalCard(t, i) : i.kind === "question" ? questionCard(t, i) : otherCard(t));
+}
+
+function approvalCard(t, i) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `<div class="k">Needs your OK</div><div class="q">${esc(i.summary)}</div>${i.detail ? `<pre>${esc(i.detail)}</pre>` : ""}
+    <div class="btns"><button class="btn" data-d="deny">Deny</button>${i.canAllowForSession ? `<button class="btn" data-d="allow_for_session">Always</button>` : ""}<button class="btn primary" data-d="allow_once">Allow</button></div>`;
+  el.querySelectorAll("[data-d]").forEach((b) => b.onclick = async () => {
+    el.querySelectorAll("button").forEach((x) => x.disabled = true);
+    try { await rpc("approve", { threadId: t.id, interactionId: i.id, decision: b.dataset.d }); refreshSoon(t.id); }
+    catch (e) { toast(e.message); el.querySelectorAll("button").forEach((x) => x.disabled = false); }
+  });
+  return el;
+}
+
+function questionCard(t, i) {
+  const el = document.createElement("div");
+  el.className = "card";
+  const picked = {};
+  const html = [`<div class="k">Question</div>`];
+  for (const q of i.questions) {
+    picked[q.id] = new Set();
+    html.push(`<div class="q">${esc(q.prompt)}</div><div class="choices" data-q="${esc(q.id)}">`);
+    for (const o of q.options) html.push(`<button class="choice" data-v="${esc(o.value)}">${esc(o.label)}${o.description ? `<small>${esc(o.description)}</small>` : ""}</button>`);
+    html.push(`</div>`);
+    if (q.allowFreeText || !q.options.length) html.push(`<input type="text" data-free="${esc(q.id)}" placeholder="${q.options.length ? "Or type an answer" : "Your answer"}">`);
+  }
+  html.push(`<div class="btns"><button class="btn primary" data-submit disabled>Answer</button></div>`);
+  el.innerHTML = html.join("");
+  const submit = el.querySelector("[data-submit]");
+  const ready = () => i.questions.every((q) => picked[q.id].size || (el.querySelector(`[data-free="${CSS.escape(q.id)}"]`)?.value.trim()));
+  const update = () => { submit.disabled = !ready(); };
+  el.querySelectorAll(".choices").forEach((group) => {
+    const q = i.questions.find((x) => x.id === group.dataset.q);
+    group.querySelectorAll(".choice").forEach((b) => b.onclick = () => {
+      const set = picked[q.id];
+      if (q.multiSelect) { set.has(b.dataset.v) ? set.delete(b.dataset.v) : set.add(b.dataset.v); }
+      else { set.clear(); set.add(b.dataset.v); }
+      group.querySelectorAll(".choice").forEach((x) => x.classList.toggle("on", set.has(x.dataset.v)));
+      update();
+    });
+  });
+  el.querySelectorAll("[data-free]").forEach((inp) => inp.oninput = update);
+  // One single-choice question answers on tap; Answer only appears once
+  // something is typed into its free-text box.
+  const one = i.questions.length === 1 && !i.questions[0].multiSelect && i.questions[0].options.length;
+  if (one) {
+    const free = el.querySelector("[data-free]");
+    const sync = () => { submit.parentElement.hidden = !free?.value.trim(); };
+    sync();
+    free?.addEventListener("input", () => { picked[i.questions[0].id].clear(); sync(); });
+    el.querySelectorAll(".choice").forEach((b) => b.addEventListener("click", () => { if (free) free.value = ""; send(); }));
+  }
+  submit.onclick = () => send();
+  async function send() {
+    const answers = {};
+    for (const q of i.questions) {
+      const free = el.querySelector(`[data-free="${CSS.escape(q.id)}"]`)?.value.trim();
+      answers[q.id] = { selected: [...picked[q.id]], ...(free ? { freeText: free } : {}) };
+    }
+    el.querySelectorAll("button, input").forEach((x) => x.disabled = true);
+    try { await rpc("answer", { threadId: t.id, interactionId: i.id, answers }); refreshSoon(t.id); }
+    catch (e) { toast(e.message); el.querySelectorAll("button, input").forEach((x) => x.disabled = false); }
+  }
+  return el;
+}
+
+function otherCard(t) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `<div class="k">Needs you</div><div class="q">This one needs the full app.</div><div class="btns"><a class="btn primary" href="${fullUrl(t)}">Open in full bb</a></div>`;
+  return el;
+}
+
+// ---------- quick replies ----------
+// Suggested one-tap replies under the agent's latest message. Tap: sends after
+// a 2-second "tap to cancel". Press and hold: puts the text in the reply box.
+const pillCache = new Map(); // threadId -> { forAt, pills }
+let pillSend = null;
+
+async function loadPills(t) {
+  const box = $("pills");
+  const last = t.messages[t.messages.length - 1];
+  const eligible = last?.role === "assistant" && !isWorking(t.status) && !t.interactions.length;
+  if (!eligible) { if (!pillSend) { box.innerHTML = ""; $("recWhy").hidden = true; } return; }
+  // Stale thread: Sol's opinionated set replaces the quick suggestions.
+  if (t.rec?.pills?.length) return renderPills(t.id, t.rec.pills, { rec: t.rec.recommended === 0, reason: t.rec.reason, stake: t.rec.stake });
+  const have = pillCache.get(t.id);
+  if (have && have.forAt === last.at) return renderPills(t.id, have.pills);
+  if (have?.loading === last.at) return;
+  pillCache.set(t.id, { ...(have || {}), loading: last.at });
+  try {
+    const r = await rpc("suggest", { threadId: t.id });
+    pillCache.set(t.id, r);
+    if (state.thread?.id === t.id) renderPills(t.id, r.pills);
+  } catch { pillCache.delete(t.id); }
+}
+
+function renderPills(threadId, pills, meta = {}) {
+  const box = $("pills");
+  if (pillSend) return; // don't redraw under a pending send
+  const key = JSON.stringify([pills, meta]);
+  if (box.dataset.key === threadId + key) return;
+  box.dataset.key = threadId + key;
+  const why = $("recWhy");
+  why.hidden = !(meta.rec && (meta.reason || meta.stake));
+  if (meta.rec) why.innerHTML = `${meta.stake ? `<div class="stake">${esc(meta.stake)}</div>` : ""}<b>✦ I'd go with “${esc(pills[0].label)}”</b>${meta.reason ? `: ${esc(meta.reason)}` : ""}`;
+  box.innerHTML = pills.map((p, i) => `<button class="pill2${meta.rec && i === 0 ? " rec" : ""}" data-i="${i}"><span>${esc(p.label)}</span></button>`).join("");
+  // Any scroll of the row cancels a hold in progress.
+  box.onscroll = () => box.querySelectorAll(".pill2.pressing").forEach((x) => x.dispatchEvent(new Event("pointercancel")));
+  box.querySelectorAll(".pill2").forEach((b) => {
+    const p = pills[Number(b.dataset.i)];
+    // Long press = edit, but only if the finger stays put: swiping the row
+    // sideways to see more pills used to count as a hold (9/24).
+    let held = false, timer = 0, x0 = 0, y0 = 0;
+    const cancelHold = () => { clearTimeout(timer); b.classList.remove("pressing"); };
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+    b.addEventListener("pointerdown", (e) => {
+      held = false; x0 = e.clientX; y0 = e.clientY;
+      b.classList.add("pressing");
+      timer = setTimeout(() => { held = true; b.classList.remove("pressing"); editPill(p); }, 500);
+    });
+    b.addEventListener("pointermove", (e) => { if (Math.abs(e.clientX - x0) > 8 || Math.abs(e.clientY - y0) > 8) cancelHold(); });
+    b.addEventListener("touchmove", cancelHold, { passive: true }); // Safari may send touch moves without pointer moves while scrolling
+    b.addEventListener("pointerup", cancelHold);
+    b.addEventListener("pointercancel", cancelHold); // fired when the row takes over to scroll
+    b.addEventListener("pointerleave", cancelHold);
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (held) return;
+      const i = Number(b.dataset.i);
+      armPill(b, {
+        threadId, text: p.text, label: p.label, recommended: !!meta.rec && i === 0, stale: !!meta.rec || meta.reason !== undefined, source: "thread",
+        after: () => { box.innerHTML = ""; box.dataset.key = ""; $("recWhy").hidden = true; refreshSoon(threadId); },
+      });
+    });
+  });
+}
+
+// Hold-to-edit replaces what's in the reply box, so the toast offers Undo:
+// an accidental hold then costs nothing.
+function editPill(p) {
+  const before = reply.value;
+  reply.value = p.text;
+  reply.dispatchEvent(new Event("input"));
+  reply.focus();
+  undoToast("In the reply box", () => {
+    reply.value = before;
+    reply.dispatchEvent(new Event("input"));
+    reply.blur();
+  });
+}
+
+function undoToast(text, onUndo, ms = 5000) {
+  document.querySelectorAll(".toast.undoable").forEach((x) => x.remove());
+  const el = document.createElement("div");
+  el.className = "toast undoable";
+  el.innerHTML = `<span class="tt">${esc(text)}</span><button>Undo</button><i class="drain" style="animation-duration:${ms}ms"></i>`;
+  document.body.appendChild(el);
+  const t = setTimeout(() => el.remove(), ms);
+  // pointerdown, not click: tapping it must not blur the reply box first.
+  el.querySelector("button").addEventListener("pointerdown", (e) => { e.preventDefault(); clearTimeout(t); el.remove(); onUndo(); });
+}
+
+// Tap a pill: it counts down "Sending… tap to cancel" for 2 s (the finger is
+// already there), then sends. Every completed tap is logged for the
+// "does being opinionated help" check.
+function armPill(b, { threadId, text, label, recommended, stale, source, after }) {
+  if (pillSend) {
+    if (pillSend.button === b) {
+      clearTimeout(pillSend.timer);
+      pillSend.restore();
+      pillSend = null;
+      toast("Not sent");
+    }
+    return;
+  }
+  const span = b.querySelector("span");
+  const was = span.textContent;
+  const siblings = [...(b.parentElement?.querySelectorAll(".pill2") || [])].filter((x) => x !== b);
+  siblings.forEach((x) => { x.disabled = true; });
+  b.classList.add("sending");
+  span.textContent = "Sending… tap to cancel";
+  pillSend = {
+    button: b,
+    restore: () => { b.classList.remove("sending"); span.textContent = was; siblings.forEach((x) => { x.disabled = false; }); },
+    timer: setTimeout(async () => {
+      try {
+        const r = await rpc("send", { threadId, text });
+        toast(r.delivery === "queued" ? `Queued: ${label}` : `Sent: ${label}`);
+        rpc("pillLog", { threadId, label: label.slice(0, 60), recommended: !!recommended, stale: !!stale, source }).catch(() => {});
+      } catch (e) { toast(e.message); }
+      pillSend = null;
+      after?.();
+    }, 2000),
+  };
+}
+
+const fullUrl = (t) => `/projects/${encodeURIComponent(t.projectId)}/threads/${encodeURIComponent(t.id)}`;
+function refreshSoon(id) { clearTimeout(timer); setTimeout(() => loadThread(id, false), 600); }
+
+// composer
+const reply = $("reply");
+function grow(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.4) + "px"; }
+const syncSend = () => { $("sendBtn").disabled = !reply.value.trim() || recorder.active; };
+reply.addEventListener("input", () => { grow(reply); syncSend(); });
+$("replyForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = reply.value.trim();
+  const t = state.thread;
+  if (!text || !t || state.busy) return;
+  state.busy = true;
+  $("sendBtn").disabled = true;
+  try {
+    const r = await rpc("send", { threadId: t.id, text });
+    reply.value = ""; grow(reply);
+    if (r.delivery === "queued") toast("Queued. It goes in after the current step.");
+    refreshSoon(t.id);
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    state.busy = false;
+    syncSend();
+  }
+});
+
+// Dictation into a text box: the mic becomes a recording bar in place, and
+// the transcript lands in the box for a look before sending.
+function dictateInto(ui) {
+  return async () => {
+    if (recorder.active) return;
+    cues.unlock();
+    ui.on();
+    try {
+      await recorder.start((secs) => { ui.tick(secs); if (secs > 600) done(); });
+      cues.start();
+    } catch (e) {
+      ui.off(); toast(micError(e)); return;
+    }
+    let finished = false;
+    async function done() {
+      if (finished) return; finished = true;
+      ui.busy();
+      queueMicrotask(() => cues.stop());
+      const blob = await recorder.stop();
+      try {
+        const text = await transcribe(blob);
+        const box = ui.box;
+        box.value = box.value.trim() ? `${box.value.trim()} ${text}` : text;
+        box.dispatchEvent(new Event("input"));
+      } catch (e) { toast(e.message); }
+      ui.off();
+    }
+    ui.bind(done, () => { finished = true; recorder.cancel(); cues.cancel(); ui.off(); });
+  };
+}
+
+$("replyMic").onclick = dictateInto({
+  box: reply,
+  on() { $("replyMic").hidden = true; reply.hidden = true; $("sendBtn").hidden = true; $("replyRec").hidden = false; $("replyRecNote").textContent = "Listening…"; $("replyClock").textContent = "0:00"; syncSend(); },
+  tick(s) { $("replyClock").textContent = mmss(s); },
+  busy() { $("replyRecNote").textContent = "Transcribing…"; },
+  off() { $("replyMic").hidden = false; reply.hidden = false; $("sendBtn").hidden = false; $("replyRec").hidden = true; syncSend(); grow(reply); },
+  bind(done, cancel) { $("replyRecDone").onclick = done; $("replyRecCancel").onclick = cancel; },
+});
+
+// menu
+$("menuBtn").onclick = () => {
+  const t = state.thread;
+  if (!t) return;
+  const items = [];
+  items.push(`<button data-a="read">${t.unread ? "Mark read" : "Mark unread"}</button>`);
+  items.push(`<button data-a="pin">${t.pinned ? "Unpin" : "Pin to top"}</button>`);
+  items.push(`<button data-a="tray">Artifacts from this thread</button>`);
+  items.push(`<button data-a="rename">Rename</button>`);
+  items.push(`<button data-a="exec">Model &amp; machine: ${esc(t.exec?.modelName || "default")}</button>`);
+  if (isWorking(t.status)) items.push(`<button data-a="stop">Stop</button>`);
+  items.push(`<button data-a="done">Done: archive it</button>`);
+  items.push(`<a href="${fullUrl(t)}">Open in full bb</a>`);
+  items.push(`<button data-close>Cancel</button>`);
+  const sheet = openSheet(`<div class="menu">${items.join("")}</div>`);
+  sheet.querySelectorAll("[data-a]").forEach((b) => b.onclick = async () => {
+    closeSheet();
+    try {
+      if (b.dataset.a === "read") await toggleRead(t.id);
+      if (b.dataset.a === "pin") await togglePin(t.id);
+      if (b.dataset.a === "tray") openThreadTray();
+      if (b.dataset.a === "rename") renameThread(t.id, t.title);
+      if (b.dataset.a === "exec") execSheet();
+      if (b.dataset.a === "stop") { await rpc("stop", { threadId: t.id }); toast("Stopped."); refreshSoon(t.id); }
+      if (b.dataset.a === "done") {
+        const r = await rpc("done", { threadId: t.id });
+        if (r.ok) { toast("Archived."); location.hash = ""; } else toast(r.reason);
+      }
+    } catch (e) { toast(e.message); }
+  });
+  sheet.querySelectorAll("[data-close]").forEach((b) => b.onclick = closeSheet);
+};
+
+// ---------- new ----------
+async function renderNew() {
+  if (!state.home) { try { state.home = await rpc("home"); } catch (e) { toast(e.message); return; } }
+  const projects = state.home.projects;
+  if (!state.project && projects.length) state.project = projects[0].id;
+  const top = projects.slice(0, 6);
+  if (state.project && !top.some((p) => p.id === state.project)) {
+    const cur = projects.find((p) => p.id === state.project);
+    if (cur) top.push(cur);
+  }
+  $("chips").innerHTML = top.map((p) => `<button class="chip${p.id === state.project ? " on" : ""}" data-p="${esc(p.id)}">${esc(p.name)}</button>`).join("")
+    + (projects.length > top.length ? `<button class="chip" data-more>Other…</button>` : "");
+  $("chips").querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { state.project = b.dataset.p; renderNew(); });
+  const more = $("chips").querySelector("[data-more]");
+  const sel = $("allProjects");
+  if (more) more.onclick = () => {
+    sel.innerHTML = projects.map((p) => `<option value="${esc(p.id)}"${p.id === state.project ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    sel.hidden = false;
+    sel.focus();
+  };
+  sel.onchange = () => { state.project = sel.value; sel.hidden = true; renderNew(); };
+  renderNewSetup();
+  updateStart();
+}
+
+// The project's machines and default model; choices reset when the project changes.
+async function renderNewSetup() {
+  const pid = state.project;
+  if (!pid) return;
+  if (state.newSetup?.projectId !== pid) {
+    $("machineChips").innerHTML = `<span class="hint">…</span>`;
+    try {
+      const s = await rpc("projectSetup", { projectId: pid });
+      if (state.project !== pid) return;
+      state.newSetup = { projectId: pid, ...s };
+      state.newHost = (s.machines.find((m) => m.isDefault && m.online) || s.machines.find((m) => m.online) || s.machines[0])?.hostId || null;
+      state.newExec = null; // null = the project's default
+    } catch (e) { $("machineChips").innerHTML = `<span class="hint">${esc(e.message)}</span>`; return; }
+  }
+  const s = state.newSetup;
+  $("machineChips").innerHTML = s.machines.length
+    ? s.machines.map((m) => `<button class="chip${m.hostId === state.newHost ? " on" : ""}" data-host="${esc(m.hostId)}" ${m.online ? "" : "disabled"}>${esc(shortMachine(m.name))}${m.online ? "" : " · offline"}${m.isDefault ? " · default" : ""}</button>`).join("")
+    : `<span class="hint">The project's default machine</span>`;
+  $("machineChips").querySelectorAll("[data-host]").forEach((b) => b.onclick = () => { state.newHost = b.dataset.host; renderNewSetup(); });
+  const d = s.defaults;
+  if (!catalogCache) { try { catalogCache = (await rpc("catalog")).providers; } catch {} }
+  const prov = (catalogCache || []).find((p) => p.id === (state.newExec?.providerId || d.providerId));
+  const mdl = prov?.models.find((m) => m.id === (state.newExec?.model || d.model));
+  $("newModelText").textContent = state.newExec
+    ? execLabel(state.newExec)
+    : `${[prov?.name || d.providerId, mdl?.name || d.model, d.reasoningLevel].filter(Boolean).join(" · ")} (project default)`;
+}
+$("newModel").onclick = async () => {
+  const d = state.newSetup?.defaults || {};
+  const cur = state.newExec || { providerId: d.providerId, model: d.model, reasoning: d.reasoningLevel };
+  const pick = await pickModel({ providerId: cur.providerId, model: cur.model, reasoning: cur.reasoning });
+  if (pick) { state.newExec = pick; renderNewSetup(); }
+};
+const updateStart = () => { $("startBtn").disabled = !$("prompt").value.trim() || !state.project || state.busy || recorder.active; };
+$("prompt").addEventListener("input", updateStart);
+$("newMic").onclick = () => {
+  if (recorder.active) return newDone?.();
+  dictateInto({
+    box: $("prompt"),
+    on() { $("newMic").classList.add("on"); $("newMic").querySelector("span").textContent = "0:00 · tap to finish"; updateStart(); },
+    tick(s) { $("newMic").querySelector("span").textContent = `${mmss(s)} · tap to finish`; },
+    busy() { $("newMic").querySelector("span").textContent = "Transcribing…"; },
+    off() { $("newMic").classList.remove("on"); $("newMic").querySelector("span").textContent = "Dictate"; newDone = null; updateStart(); },
+    bind(done) { newDone = done; },
+  })();
+};
+let newDone = null;
+$("startBtn").onclick = async () => {
+  const text = $("prompt").value.trim();
+  if (!text || !state.project) return;
+  state.busy = true; updateStart();
+  try {
+    const x = state.newExec;
+    const def = (state.newSetup?.machines || []).find((m) => m.isDefault);
+    const { threadId } = await rpc("start", {
+      projectId: state.project, text,
+      ...(x ? { providerId: x.providerId, model: x.model, ...(x.reasoning ? { reasoningLevel: x.reasoning } : {}) } : {}),
+      // Only name a machine when it isn't the project's default.
+      ...(state.newHost && state.newHost !== def?.hostId ? { hostId: state.newHost } : {}),
+    });
+    $("prompt").value = "";
+    location.replace(`#/t/${threadId}`);
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    state.busy = false; updateStart();
+  }
+};
+
+// ---------- artifacts ----------
+const GLYPH = { doc: "DOC", sheet: "XLS", slides: "PPT", drive: "FILE", pdf: "PDF", page: "WEB", video: "VID", design: "ART", link: "LINK", note: "MD", image: "IMG", audio: "AUD", form: "FORM", file: "FILE" };
+
+async function loadArtifacts() {
+  if (!state.artifacts) $("artList").innerHTML = `<div class="fail">Gathering what's been made…</div>`;
+  try {
+    state.artifacts = (await rpc("artifacts")).items;
+    renderArtifacts();
+  } catch (e) {
+    $("artList").innerHTML = `<div class="fail">Couldn't load artifacts.<br>${esc(e.message)}</div>`;
+  }
+}
+
+function dayLabel(ms) {
+  const d = new Date(ms), today = new Date();
+  const diff = Math.round((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return d.toLocaleDateString(undefined, { weekday: "long" });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function renderArtifacts() {
+  document.querySelectorAll(".seg [data-f]").forEach((b) => b.classList.toggle("on", b.dataset.f === state.artFilter));
+  const items = state.artifacts.filter((a) => state.artFilter === "all" || a.primary).slice(0, 200);
+  if (!items.length) { $("artList").innerHTML = `<div class="fail">Nothing yet.</div>`; return; }
+  const html = [];
+  let day = "";
+  for (const a of items) {
+    const d = dayLabel(a.at);
+    if (d !== day) { day = d; html.push(`<h2 class="section">${esc(d)}</h2>`); }
+    const where = a.threadTitle ? esc(a.threadTitle) : a.source === "tray" ? "Tray" : "";
+    const what = a.isFile ? esc(a.target.split("/").pop()) : esc(new URL(a.target).hostname.replace(/^www\./, ""));
+    html.push(`<a class="art${a.seen ? "" : " fresh"}" href="open?id=${encodeURIComponent(a.id)}" target="_blank" rel="noopener" data-id="${a.id}">
+      <span class="glyph ${a.kind}">${GLYPH[a.kind] || "FILE"}</span>
+      <span><div class="l">${esc(a.label)}</div><div class="m">${where ? `${where} · ` : ""}${what} · ${ago(a.at)}</div></span></a>`);
+  }
+  $("artList").innerHTML = html.join("");
+  $("artList").querySelectorAll(".art").forEach((el) => el.addEventListener("click", () => {
+    const a = state.artifacts.find((x) => x.id === el.dataset.id);
+    if (a) a.seen = true;
+    el.classList.remove("fresh");
+  }));
+}
+document.querySelectorAll(".seg [data-f]").forEach((b) => b.onclick = () => { state.artFilter = b.dataset.f; renderArtifacts(); });
+$("allSeen").onclick = async () => {
+  const ids = (state.artifacts || []).filter((a) => !a.seen).map((a) => a.id);
+  if (!ids.length) return toast("Nothing new.");
+  for (const a of state.artifacts) a.seen = true;
+  renderArtifacts();
+  if (state.home) state.home.newArtifacts = 0;
+  try { await rpc("artifactsSeen", { ids: ids.slice(0, 500) }); } catch (e) { toast(e.message); }
+};
+
+// ---------- walk: a live Talk to BB session ----------
+// Pocket is only a phone front end for the Talk to BB plugin: same voice
+// socket, same tools, same limits. Its audio worklet does the PCM work.
+const walk = { phase: "idle", ws: null, ctx: null, stream: null, node: null, lock: null, captions: [], receipts: [], micOff: false, quiet: false, speakingTimer: 0, note: "" };
+
+function renderWalk() {
+  const orb = $("worb");
+  orb.className = "worb" + (walk.phase === "live" ? (walk.micOff ? " paused" : " live") : "");
+  const c = $("walkControls");
+  if (walk.phase === "idle") {
+    c.innerHTML = `<button class="btn primary" id="wStart">Start talking</button>`;
+    $("wStart").onclick = startWalk;
+  } else {
+    c.innerHTML = `<button class="btn danger" id="wEnd">End</button><button class="btn" id="wMic" ${walk.phase !== "live" ? "disabled" : ""}>${walk.micOff ? "Unmute" : "Mute"}</button><button class="btn" id="wQuiet" ${walk.phase !== "live" ? "disabled" : ""}>${walk.quiet ? "Hear replies" : "Quiet"}</button>`;
+    $("wEnd").onclick = () => endWalk("Session ended.");
+    $("wMic").onclick = () => { walk.micOff = !walk.micOff; walk.stream?.getAudioTracks().forEach((t) => t.enabled = !walk.micOff); renderWalk(); };
+    $("wQuiet").onclick = () => {
+      walk.quiet = !walk.quiet;
+      if (walk.quiet) walk.node?.port.postMessage({ type: "flush" }); else walk.ctx?.resume();
+      walkSend({ type: walk.quiet ? "mute" : "resume" });
+      renderWalk();
+    };
+  }
+  $("captions").innerHTML = walk.captions.slice(-12).map((c) => `<div class="cap ${c.speaker === "you" ? "you" : ""}"><b>${c.speaker === "you" ? "You" : "BB"}</b>${esc(c.text)}</div>`).join("");
+  $("captions").scrollTop = $("captions").scrollHeight;
+  const r = $("receipts");
+  r.hidden = !walk.receipts.length;
+  r.innerHTML = walk.receipts.slice(0, 6).map((x) => `<button class="receipt" data-t="${x.threadId || ""}"><div>${esc(x.title)}</div><small>${esc(String(x.status || "").replaceAll("-", " "))}${x.detail ? ` · ${esc(x.detail)}` : ""}</small></button>`).join("");
+  r.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { if (b.dataset.t) location.hash = `#/t/${b.dataset.t}`; });
+}
+
+function walkStatus(text) { $("walkStatus").textContent = text; }
+function walkSend(obj) { if (walk.ws?.readyState === 1) walk.ws.send(JSON.stringify(obj)); }
+function caption(speaker, text) {
+  const last = walk.captions[walk.captions.length - 1];
+  if (last?.speaker === speaker) last.text += text; else walk.captions.push({ speaker, text });
+  if (walk.captions.length > 100) walk.captions.shift();
+  renderWalk();
+}
+
+async function startWalk() {
+  recorder.closeMic(); // Walk opens its own mic; don't hold two
+  audioSession("play-and-record");
+  walk.phase = "connecting"; walk.captions = []; walk.receipts = []; walk.micOff = false; walk.quiet = false;
+  renderWalk();
+  walkStatus("Checking Talk to BB…");
+  // iOS only lets audio start inside the tap. The context used to be made
+  // after two awaits, where Safari can leave it suspended for good.
+  const t0 = Date.now();
+  walk.trace = { stage: "tap", sent: 0, heard: 0 };
+  const mark = (stage) => { walk.trace.stage = stage; walk.trace[stage] = Date.now() - t0; };
+  let ctx;
+  try { ctx = new AudioContext({ sampleRate: 16000 }); ctx.resume().catch(() => {}); } catch (e) { walk.trace.ctxError = String(e?.message || e).slice(0, 120); }
+  walk.ctx = ctx;
+  try {
+    const status = await rpc("status", null, `${TALK}/rpc/`);
+    mark("status");
+    if (!status.configured) throw new Error("Talk to BB has no OpenAI key configured.");
+    if (status.active) throw new Error("A Talk to BB session is already open, probably on your computer. End it there first.");
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser can't use the microphone here.");
+    walkStatus("Allow the microphone to begin.");
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    walk.stream = stream;
+    walk.trace.mic = stream.getAudioTracks()[0]?.label?.slice(0, 60) || "";
+    mark("micOpen");
+    if (!ctx) throw new Error("This browser can't play Talk to BB's audio.");
+    walk.trace.rate = ctx.sampleRate;
+    if (ctx.sampleRate !== 16000) throw new Error("This browser can't use the audio format Talk to BB needs.");
+    await ctx.audioWorklet.addModule(`${TALK}/http/audio.js`);
+    mark("worklet");
+    await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 3000))]);
+    walk.trace.ctxState = ctx.state;
+    if (ctx.state !== "running") throw new Error("iPhone didn't start the audio. Tap Start again.");
+    const node = new AudioWorkletNode(ctx, "voice-audio");
+    walk.node = node;
+    ctx.createMediaStreamSource(stream).connect(node);
+    node.connect(ctx.destination);
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${TALK}/http/voice`);
+    ws.binaryType = "arraybuffer";
+    walk.ws = ws;
+    let ready = false;
+    const giveUp = setTimeout(() => { if (!ready) endWalk("Connection timed out. Try again."); }, 25000);
+    node.port.onmessage = ({ data }) => {
+      if (data.type === "input" && ready && ws.readyState === 1) {
+        if (ws.bufferedAmount > 64000) return endWalk("The connection fell behind. Start again.");
+        ws.send(data.buffer);
+        walk.trace.sent++;
+      }
+      if (data.type === "overflow") endWalk("Playback fell behind. Start again.");
+    };
+    ws.onopen = () => {
+      mark("wsOpen");
+      walkStatus("Connecting…");
+      const mgr = threadById(state.home?.managerId);
+      walkSend({ type: "start", context: { threadId: mgr?.id || null, projectId: mgr?.projectId || null } });
+    };
+    ws.onmessage = ({ data }) => {
+      if (data instanceof ArrayBuffer) {
+        walk.trace.heard += data.byteLength;
+        if (!walk.quiet) node.port.postMessage({ type: "audio", buffer: data }, [data]);
+        $("worb").classList.add("speaking");
+        clearTimeout(walk.speakingTimer);
+        walk.speakingTimer = setTimeout(() => $("worb").classList.remove("speaking"), 450);
+        return;
+      }
+      const e = JSON.parse(data);
+      if (e.type === "ready") { mark("ready"); ready = true; clearTimeout(giveUp); walk.phase = "live"; walkStatus("Listening. Talk whenever you like."); renderWalk(); keepAwake(); }
+      if (e.type === "transcript") caption(e.speaker, e.text);
+      if (e.type === "flush") node.port.postMessage({ type: "flush" });
+      if (e.type === "playback") { walk.quiet = !e.enabled; renderWalk(); }
+      if (e.type === "notice" && e.text) walkStatus(e.text);
+      if (e.type === "lookup") walkStatus(e.state === "reading" ? "Checking BB…" : e.state === "failed" ? "That lookup didn't finish." : "Listening.");
+      // The opening "actions" snapshot is history from earlier sessions; on
+      // a phone only what happens in this call is worth the space.
+      if (e.type === "action") { walk.receipts = [e.receipt, ...walk.receipts.filter((r) => r.id !== e.receipt.id)].slice(0, 20); renderWalk(); }
+      // "Bring that thread up": Pocket shows it as a tappable receipt rather
+      // than navigating away from the call.
+      if (e.type === "ui-action" && e.kind === "focus-thread") {
+        walk.receipts = [{ id: e.id, title: e.title || "Thread", status: "brought up · tap to open", threadId: e.threadId }, ...walk.receipts].slice(0, 20);
+        renderWalk();
+        walkSend({ type: "ui-result", id: e.id, threadId: e.threadId, ok: true });
+      }
+      // There is no screen to share from a phone.
+      if (e.type === "ui-action" && e.kind === "capture-screen") walkSend({ type: "screen-frame", id: e.id, ok: false, reason: "not-sharing" });
+      if (e.type === "fault") endWalk(e.message);
+      if (e.type === "closed") endWalk(e.reason === "time-limit" ? `Twenty-minute limit reached. Anything unfinished carries into your next session.` : `Session ended (${Math.round(e.seconds || 0)} seconds).`);
+    };
+    ws.onerror = () => { walk.trace.wsError = true; endWalk("Couldn't connect to Talk to BB."); };
+    ws.onclose = (ev) => { if (walk.trace) walk.trace.closeCode = ev.code; if (walk.phase !== "idle") endWalk(ev.code === 1000 ? "Session ended." : `Connection dropped (${ev.code}).`); };
+  } catch (e) {
+    endWalk(micError(e));
+  }
+}
+
+function endWalk(message) {
+  // One line per session so a failure on the phone can be read on the server.
+  if (walk.trace) {
+    const t = walk.trace; walk.trace = null;
+    const n = walk.stream?.getAudioTracks()[0];
+    rpc("voiceLog", { outcome: "walk", end: String(message).slice(0, 120), ctxNow: walk.ctx?.state || null, track: n ? `${n.readyState}${n.muted ? " muted" : ""}` : null, ...t }).catch(() => {});
+  }
+  setTimeout(() => { if (walk.phase === "idle" && !recorder.stream) audioSession("ambient"); }, 300);
+  walkSend({ type: "stop" });
+  const w = walk;
+  try { w.ws?.close(); } catch {}
+  w.stream?.getTracks().forEach((t) => t.stop());
+  try { w.node?.disconnect(); } catch {}
+  w.ctx?.close().catch(() => {});
+  w.lock?.release?.().catch?.(() => {});
+  Object.assign(w, { phase: "idle", ws: null, ctx: null, stream: null, node: null, lock: null });
+  walkStatus(message);
+  renderWalk();
+}
+
+// The screen has to stay on: a locked phone suspends the page and the mic.
+async function keepAwake() {
+  try { walk.lock = await navigator.wakeLock?.request("screen"); } catch {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && walk.phase === "live" && !walk.lock) keepAwake(); });
+window.addEventListener("pagehide", () => { if (walk.phase !== "idle") endWalk("Session ended."); });
+
+// ---------- drafts ----------
+const WEEK = 7 * 86400000;
+function draftCount() {
+  const d = state.drafts;
+  if (!d || !d.enabled) return { fresh: 0, older: 0 };
+  const all = [...d.gmail, ...d.slack];
+  const fresh = all.filter((x) => Date.now() - x.at < WEEK).length;
+  return { fresh, older: all.length - fresh };
+}
+
+async function loadDrafts(fresh) {
+  if (!state.drafts) $("draftList").innerHTML = `<div class="fail">Checking Gmail and Slack…</div>`;
+  else renderDrafts();
+  try {
+    const d = await rpc("drafts", { fresh: !!fresh });
+    state.draftsAt = Date.now();
+    // Redraw only if something changed, so a draft you're reading stays put.
+    if (JSON.stringify(d) !== JSON.stringify(state.drafts)) { state.drafts = d; renderDrafts(); }
+  }
+  catch (e) { if (!state.drafts) $("draftList").innerHTML = `<div class="fail">Couldn't load drafts.<br>${esc(e.message)}</div>`; }
+}
+
+// The Gmail app has no link to a draft or even the Drafts folder (its scheme
+// only opens the app or a blank compose), so on a phone the button opens the
+// app and says where the draft is; on a computer it opens the draft itself.
+const isPhone = /iPhone|iPad|Android/.test(navigator.userAgent);
+const gmailUrl = (hex) => isPhone ? "googlegmail://" : `https://mail.google.com/mail/u/0/#drafts?compose=${encodeURIComponent(hex)}`;
+const slackUrl = (team, ch) => `slack://channel?team=${encodeURIComponent(team || "")}&id=${encodeURIComponent(ch)}`;
+
+function renderDrafts() {
+  const d = state.drafts;
+  const row = (x) => x.kind === "slack"
+    ? `<div class="draft" data-k="${esc(x.key)}"><button><span class="glyph slackg">SL</span><span>
+        <div class="who">${esc(x.target)}${x.thread ? " · in thread" : ""}</div><div class="snip">${esc(x.text)}</div>
+        <div class="m">Slack · ${ago(x.at)}</div></span></button></div>`
+    : `<div class="draft" data-g="${esc(x.id)}" data-hex="${esc(x.hexId)}"><button><span class="glyph gmail">@</span><span>
+        <div class="who">${esc(x.to)}</div><div class="subj">${esc(x.subject)}</div><div class="snip">${esc(x.snippet)}</div>
+        <div class="m">${x.agent ? "Agent" : "You"} · ${ago(x.at)}${x.older ? ` · <span class="older">+${x.older} older draft${x.older === 1 ? "" : "s"} in this thread</span>` : ""}</div></span></button></div>`;
+  const items = [...d.slack.map((x) => ({ ...x, kind: "slack" })), ...d.gmail.map((x) => ({ ...x, kind: "gmail" }))].sort((a, b) => b.at - a.at);
+  const fresh = items.filter((x) => Date.now() - x.at < WEEK), old = items.filter((x) => Date.now() - x.at >= WEEK);
+  const html = [];
+  if (d.gmailError) html.push(`<div class="fail">Gmail didn't answer: ${esc(d.gmailError)}</div>`);
+  html.push(fresh.length ? fresh.map(row).join("") : `<div class="fail">Nothing waiting from the last week.</div>`);
+  if (old.length) html.push(`<details class="olderdrafts"><summary>${old.length} older than a week ›</summary>${old.map(row).join("")}</details>`);
+  html.push(`<p class="hint" style="margin:18px 20px">Slack drafts come from the draft log set in Pocket's settings, and disappear once you've sent them.</p>`);
+  $("draftList").innerHTML = html.join("");
+  $("draftList").querySelectorAll(".draft > button").forEach((b) => b.onclick = () => toggleDraft(b.parentElement));
+  // Keep any draft you had open, open.
+  for (const key of state.openDrafts || []) {
+    const el = $("draftList").querySelector(`.draft[data-k="${CSS.escape(key)}"], .draft[data-hex="${CSS.escape(key)}"]`);
+    if (el) { el.closest("details")?.setAttribute("open", ""); toggleDraft(el); }
+  }
+}
+
+async function toggleDraft(el) {
+  const key = el.dataset.k || el.dataset.hex;
+  state.openDrafts ??= new Set();
+  const open = el.querySelector(".open");
+  if (open) { open.remove(); state.openDrafts.delete(key); return; }
+  state.openDrafts.add(key);
+  const box = document.createElement("div");
+  box.className = "open";
+  el.appendChild(box);
+  if (el.dataset.k) {
+    const x = state.drafts.slack.find((s) => s.key === el.dataset.k);
+    box.innerHTML = `<div class="body">${esc(x.text)}</div>
+      <div class="btns"><button class="btn" data-hide>Hide</button><a class="btn primary" href="${slackUrl(state.drafts.teamId, x.channel)}">Open in Slack</a></div>`;
+  } else {
+    box.innerHTML = `<div class="body">Loading…</div>`;
+    try {
+      const b = await rpc("draftBody", { id: el.dataset.g });
+      box.innerHTML = `<div class="hdr">To ${esc(b.to)}${b.cc ? `<br>Cc ${esc(b.cc)}` : ""}</div><div class="body">${esc(b.body || "(empty)")}</div>
+        <div class="btns"><button class="btn" data-hide>Hide</button><a class="btn primary" href="${gmailUrl(el.dataset.hex)}" ${isPhone ? "" : `target="_blank" rel="noopener"`}>Open Gmail</a></div>
+        ${isPhone ? `<p class="hint" style="margin:8px 0 0">Opens the Gmail app. It's in Drafts${b.subject ? `, "${esc(b.subject.slice(0, 60))}"` : ""}.</p>` : ""}`;
+    } catch (e) { box.innerHTML = `<div class="body">${esc(e.message)}</div>`; }
+  }
+  const hide = box.querySelector("[data-hide]");
+  if (hide) hide.onclick = async () => {
+    state.openDrafts.delete(key);
+    el.remove();
+    state.drafts.gmail = state.drafts.gmail.filter((g) => g.hexId !== key);
+    state.drafts.slack = state.drafts.slack.filter((s) => s.key !== key);
+    toast("Hidden from Pocket. It's still in Gmail or Slack.");
+    try { await rpc("dismissDraft", { key }); } catch {}
+  };
+}
+
+// ---------- machines & models ----------
+// "Sam's MacBook Pro" -> "MacBook Pro": the owner is always you.
+const shortMachine = (n) => String(n || "").replace(/^[^’']+[’']s\s+/, "");
+const machineById = (id) => (state.home?.machines || []).find((m) => m.id === id);
+function renderMachineLine() {
+  const ms = state.home?.machines || [];
+  $("machineLine").innerHTML = ms.map((m) => `<span><i class="mdot${m.online ? "" : " off"}"></i><span class="${m.online ? "" : "off-name"}">${esc(shortMachine(m.name))}</span></span>`).join("");
+}
+
+// Model picker. `fixedProvider` = an existing thread (bb only lets a thread
+// change model and reasoning, not provider). Resolves with the pick or null.
+let catalogCache = null;
+async function pickModel({ providerId, model, reasoning, fixedProvider }) {
+  if (!catalogCache) { try { catalogCache = (await rpc("catalog")).providers; } catch (e) { toast(e.message); return null; } }
+  return new Promise((resolve) => {
+    let pv = providerId || catalogCache[0]?.id, md = model, rs = reasoning;
+    const provider = () => catalogCache.find((p) => p.id === pv) || catalogCache[0];
+    const draw = () => {
+      const p = provider();
+      if (!p) { closeSheet(); resolve(null); return; }
+      if (!p.models.some((m) => m.id === md)) md = (p.models.find((m) => m.isDefault) || p.models[0]).id;
+      const m = p.models.find((x) => x.id === md);
+      if (m.efforts.length && !m.efforts.includes(rs)) rs = m.defaultEffort && m.efforts.includes(m.defaultEffort) ? m.defaultEffort : (m.efforts.includes("high") ? "high" : m.efforts[0]);
+      const sheet = openSheet(`<div class="pick">
+        ${fixedProvider ? `<h3>${esc(p.name)}</h3>` : `<h3>Provider</h3><div class="chips">${catalogCache.map((x) => `<button class="chip${x.id === p.id ? " on" : ""}" data-pv="${esc(x.id)}">${esc(x.name)}</button>`).join("")}</div><h3>Model</h3>`}
+        <ul class="plist">${p.models.map((x) => `<li><button data-md="${esc(x.id)}" class="${x.id === md ? "on" : ""}">${esc(x.name)}${x.isDefault ? ` <small>default</small>` : ""}</button></li>`).join("")}</ul>
+        ${m.efforts.length ? `<h3>Reasoning</h3><div class="chips">${m.efforts.map((e) => `<button class="chip${e === rs ? " on" : ""}" data-rs="${esc(e)}">${esc(e)}</button>`).join("")}</div>` : ""}
+        <div class="btns" style="padding:0 8px"><button class="btn" id="pickCancel">Cancel</button><button class="btn primary" id="pickDone">Use this</button></div></div>`);
+      sheet.querySelectorAll("[data-pv]").forEach((b) => b.onclick = () => { pv = b.dataset.pv; md = null; draw(); });
+      sheet.querySelectorAll("[data-md]").forEach((b) => b.onclick = () => { md = b.dataset.md; draw(); });
+      sheet.querySelectorAll("[data-rs]").forEach((b) => b.onclick = () => { rs = b.dataset.rs; draw(); });
+      sheet.querySelector("#pickCancel").onclick = () => { closeSheet(); resolve(null); };
+      sheet.querySelector("#pickDone").onclick = () => {
+        closeSheet();
+        resolve({ providerId: p.id, providerName: p.name, model: md, modelName: m.name, reasoning: m.efforts.length ? rs : null });
+      };
+    };
+    draw();
+  });
+}
+const execLabel = (x) => [x.providerName, x.modelName || x.model || "default model", x.reasoning].filter(Boolean).join(" · ");
+
+// The model chip over the reply box: visible while typing (focused or text in
+// the box), because that's when the model is on your mind.
+function syncModelChip() {
+  const t = state.thread;
+  const show = !!t?.exec && !recorder.active && (document.activeElement === reply || !!reply.value.trim());
+  $("cmodel").hidden = !show;
+  if (show) $("modelChipText").textContent = [t.exec.modelName || t.exec.model || "Default model", t.exec.reasoning].filter(Boolean).join(" · ");
+}
+async function changeThreadModel() {
+  const t = state.thread;
+  if (!t?.exec) return;
+  const pick = await pickModel({ providerId: t.exec.providerId, model: t.exec.model, reasoning: t.exec.reasoning, fixedProvider: true });
+  if (!pick) return;
+  try {
+    await rpc("setModel", { threadId: t.id, model: pick.model, ...(pick.reasoning ? { reasoningLevel: pick.reasoning } : {}) });
+    t.exec = { ...t.exec, model: pick.model, modelName: pick.modelName, reasoning: pick.reasoning };
+    syncModelChip();
+    toast(`Next turns use ${pick.modelName}${pick.reasoning ? ` · ${pick.reasoning}` : ""}`);
+  } catch (e) { toast(e.message); }
+}
+// pointerdown + preventDefault keeps the keyboard from dropping (and the chip
+// from vanishing with it) before the tap lands.
+$("modelChip").addEventListener("pointerdown", (e) => e.preventDefault());
+$("modelChip").addEventListener("click", () => { reply.blur(); changeThreadModel(); });
+reply.addEventListener("focus", syncModelChip);
+reply.addEventListener("blur", () => setTimeout(syncModelChip, 150));
+reply.addEventListener("input", syncModelChip);
+
+// Thread: where it runs and what runs it; change the model from here.
+function execSheet() {
+  const t = state.thread;
+  if (!t) return;
+  const m = t.machine;
+  const sheet = openSheet(`<div class="menu"><div class="execinfo">
+      Runs on <b>${m ? esc(shortMachine(m.name)) : "an unknown machine"}</b>${m ? (m.online ? " · online" : ` · <span style="color:var(--red)">offline, so it can't run until that machine is back</span>`) : ""}<br>
+      Model <b>${esc(execLabel(t.exec))}</b></div>
+    <button data-a="model">Change model</button><button data-close>Close</button></div>`);
+  sheet.querySelector('[data-a="model"]').onclick = changeThreadModel;
+  sheet.querySelectorAll("[data-close]").forEach((b) => b.onclick = closeSheet);
+}
+
+// ---------- universal search ----------
+let searchTimer = 0, searchSeq = 0;
+function highlight(text, ranges) {
+  let out = "", at = 0;
+  for (const [a, b] of [...ranges].sort((x, y) => x[0] - y[0])) {
+    if (a < at || b > text.length) continue;
+    out += esc(text.slice(at, a)) + `<mark>${esc(text.slice(a, b))}</mark>`;
+    at = b;
+  }
+  return out + esc(text.slice(at));
+}
+function showSearch(on) {
+  $("lists").hidden = on; $("summary").hidden = on; $("searchResults").hidden = !on; $("qCancel").hidden = !on && !$("q").value;
+}
+async function runSearch() {
+  const q = $("q").value.trim();
+  state.query = q;
+  if (q.length < 2) { showSearch(false); $("searchResults").innerHTML = ""; return; }
+  showSearch(true);
+  const seq = ++searchSeq;
+  if (!$("searchResults").innerHTML) $("searchResults").innerHTML = `<div class="fail">Searching…</div>`;
+  try {
+    const r = await rpc("search", { query: q });
+    if (seq !== searchSeq) return; // a newer search is on its way
+    const html = [];
+    if (r.threads.length) {
+      html.push(`<h2 class="section">Threads</h2>`);
+      for (const t of r.threads) html.push(`<a class="srow" href="#/t/${t.id}"><div class="st">${esc(t.title)}</div>${t.snippet ? `<div class="ss">${highlight(t.snippet.replace(/\s+/g, " "), t.ranges)}</div>` : ""}<div class="sm">${t.archived ? `<span class="tag">Archived</span>` : ""}${esc(t.projectName)}${t.where ? ` · ${esc(t.where)}` : ""} · ${ago(t.updatedAt)}</div></a>`);
+    }
+    if (r.artifacts.length) {
+      html.push(`<h2 class="section">Artifacts</h2>`);
+      html.push(r.artifacts.map((a) => artRowHtml(a, a.threadTitle || "")).join(""));
+    }
+    $("searchResults").innerHTML = html.join("") || `<div class="fail">Nothing matches “${esc(q)}”.</div>`;
+  } catch (e) {
+    if (seq === searchSeq) $("searchResults").innerHTML = `<div class="fail">${esc(e.message)}</div>`;
+  }
+}
+$("q").addEventListener("input", () => { clearTimeout(searchTimer); $("qCancel").hidden = false; searchTimer = setTimeout(runSearch, 250); });
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(searchTimer); runSearch(); $("q").blur(); } });
+$("qCancel").onclick = () => { $("q").value = ""; state.query = ""; $("q").blur(); showSearch(false); $("searchResults").innerHTML = ""; };
+
+// ---------- thread artifacts tray ----------
+function artRowHtml(a, where) {
+  const what = a.isFile ? esc(a.target.split("/").pop()) : esc(new URL(a.target).hostname.replace(/^www\./, ""));
+  return `<a class="art${a.seen ? "" : " fresh"}" href="open?id=${encodeURIComponent(a.id)}" target="_blank" rel="noopener" data-id="${a.id}">
+    <span class="glyph ${a.kind}">${GLYPH[a.kind] || "FILE"}</span>
+    <span><div class="l">${esc(a.label)}</div><div class="m">${where ? `${esc(where)} · ` : ""}${what} · ${ago(a.at)}</div></span></a>`;
+}
+
+async function openThreadTray() {
+  const t = state.thread;
+  if (!t || !$("threadTray").hidden) return;
+  $("threadTray").hidden = false;
+  requestAnimationFrame(() => $("threadTray").classList.add("ttray-open"));
+  $("threadTrayList").innerHTML = `<div class="ttray-empty">Looking through this thread…</div>`;
+  try {
+    const { items } = await rpc("threadArtifacts", { threadId: t.id });
+    if (state.thread?.id !== t.id) return;
+    // Deliverables first (docs, pages, PDFs, sites), then notes and screenshots.
+    const main = items.filter((a) => a.primary), more = items.filter((a) => !a.primary);
+    $("threadTrayList").innerHTML = items.length
+      ? main.map((a) => artRowHtml(a, "")).join("") + (more.length ? `<h2 class="section">Notes &amp; images</h2>${more.map((a) => artRowHtml(a, "")).join("")}` : "")
+      : `<div class="ttray-empty">Nothing linked in this thread yet.</div>`;
+  } catch (e) {
+    $("threadTrayList").innerHTML = `<div class="ttray-empty">${esc(e.message)}</div>`;
+  }
+}
+function closeThreadTray() {
+  const el = $("threadTray");
+  if (el.hidden) return;
+  el.classList.remove("ttray-open");
+  setTimeout(() => { el.hidden = true; }, 220);
+}
+$("threadTrayScrim").onclick = closeThreadTray;
+$("trayBtn").onclick = () => openThreadTray();
+// The header button shows how many things the thread has, so the tray is
+// discoverable before anyone knows the swipe.
+async function refreshTrayCount(threadId) {
+  $("trayCount").hidden = true;
+  try {
+    const { items } = await rpc("threadArtifacts", { threadId });
+    if (!location.hash.startsWith(`#/t/${threadId}`)) return; // moved on meanwhile
+    $("trayCount").textContent = items.length > 99 ? "99+" : String(items.length);
+    $("trayCount").hidden = !items.length;
+  } catch {}
+}
+$("threadTrayClose").onclick = closeThreadTray;
+
+// Swipe in from the right edge (leftward) opens the tray; swipe right closes it.
+// Not from the left edge (the browser's own back gesture lives there), and
+// not from things that scroll sideways themselves: code, tables, the pills.
+// Forgiving on purpose: a thumb swipe arcs, so it only has to be mostly
+// sideways. The decision is made on the move or, failing that, on release.
+(() => {
+  const SKIP = "pre, .table, #pills, .composer, .card, #sheetWrap";
+  let x0 = 0, y0 = 0, dx = 0, dy = 0, live = false, fired = false, moves = 0, why = "", target = "";
+  const decide = (trayOpen) => {
+    // The tray lives on the right and is pulled in from the right: a leftward
+    // swipe that starts on the right half (in testing, real swipes started at
+    // the very right edge).
+    if (!trayOpen && x0 > innerWidth / 2 && dx < -55 && Math.abs(dy) < -dx * 0.8) { fired = true; why = "opened"; openThreadTray(); }
+    else if (trayOpen && dx > 55 && Math.abs(dy) < dx * 0.8) { fired = true; why = "closed"; closeThreadTray(); }
+  };
+  document.addEventListener("touchstart", (e) => {
+    const p = e.touches[0];
+    live = false; fired = false; moves = 0; dx = 0; dy = 0; why = "";
+    if (!p || e.touches.length > 1) return;
+    const trayOpen = !$("threadTray").hidden;
+    if ($("thread").hidden && !trayOpen) return;
+    target = (e.target.closest(SKIP)?.className || e.target.tagName || "").toString().slice(0, 30);
+    x0 = p.clientX; y0 = p.clientY; live = true;
+    if (!trayOpen && p.clientX < 20) { live = false; why = "left-edge"; } // the browser's back gesture
+    else if (!trayOpen && e.target.closest(SKIP)) { live = false; why = "skip-target"; }
+  }, { passive: true });
+  document.addEventListener("touchmove", (e) => {
+    const p = e.touches[0];
+    if (!p || (!live && !why)) return;
+    dx = p.clientX - x0; dy = p.clientY - y0; moves++;
+    if (!live || fired || moves < 3) return;
+    if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 1.5) { live = false; why = "vertical"; return; }
+    decide(!$("threadTray").hidden);
+  }, { passive: true });
+  document.addEventListener("touchend", () => {
+    if (!live && !why) return;
+    if (live && !fired && moves >= 3) decide(!$("threadTray").hidden);
+    if (!why) why = Math.abs(dx) < 55 ? "too-short" : "too-diagonal";
+    live = false;
+  }, { passive: true });
+})();
+
+// ---------- tell (from the Shortcut) ----------
+let tellTimer = 0;
+async function runTell() {
+  const tl = state.tell;
+  if (tl.running) return;
+  tl.running = true;
+  $("tellText").textContent = tl.text;
+  if (!state.home) { try { state.home = await rpc("home"); } catch {} }
+  const mgr = threadById(state.home?.managerId);
+  $("tellTo").textContent = mgr ? `To ${mgr.title}` : "To your manager";
+  // A link without the key (or with a wrong one) never auto-sends.
+  if (!tl.key) return toReview(tl.text);
+  let left = 3000;
+  const tick = () => {
+    $("tellStatus").innerHTML = `<span class="ring" style="--p:${(1 - left / 3000).toFixed(2)}"></span>Sending in ${Math.ceil(left / 1000)}…`;
+  };
+  $("tellBtns").innerHTML = `<button class="btn" id="tellCancel">Cancel</button><button class="btn primary" id="tellNow">Send now</button>`;
+  $("tellCancel").onclick = () => { clearInterval(tellTimer); cues.cancel(); state.tell = null; location.replace("#"); toast("Not sent"); };
+  $("tellNow").onclick = () => { clearInterval(tellTimer); sendTell(); };
+  tick();
+  tellTimer = setInterval(() => { left -= 100; tick(); if (left <= 0) { clearInterval(tellTimer); sendTell(); } }, 100);
+}
+
+async function sendTell() {
+  const tl = state.tell;
+  if (!tl || tl.sent) return;
+  tl.sent = true;
+  $("tellBtns").innerHTML = "";
+  $("tellStatus").textContent = "Sending…";
+  try {
+    const r = await rpc("tell", { key: tl.key, text: tl.text });
+    if (!r.ok) {
+      if (r.reason === "bad-key") return toReview(tl.text, "This link's key didn't match, so it wasn't sent automatically.");
+      $("tellStatus").textContent = "No manager thread found. Pick where it goes:";
+      return toReview(tl.text);
+    }
+    cues.stop();
+    $("tellTo").textContent = `To ${r.title}`;
+    $("tellStatus").innerHTML = `<span class="ok">✓ ${r.delivery === "queued" ? "Queued" : "Sent"}</span>`;
+    $("tellBtns").innerHTML = `<a class="btn" href="#">Done</a><a class="btn primary" href="#/t/${r.threadId}">Open thread</a>`;
+    state.tell = null;
+    // Each Shortcut run opens a new browser tab. Try to close it; browsers
+    // often refuse for tabs they didn't open by script, and then this is a no-op.
+    setTimeout(() => { if (!$("tell").hidden) { try { window.close(); } catch {} } }, 1800);
+  } catch (e) {
+    tl.sent = false;
+    $("tellStatus").textContent = e.message;
+    $("tellBtns").innerHTML = `<button class="btn primary" id="tellRetry">Try again</button>`;
+    $("tellRetry").onclick = sendTell;
+  }
+}
+
+// Fall back to the normal review sheet: you see the text and tap Send.
+function toReview(text, note) {
+  state.tell = null;
+  location.replace("#");
+  setTimeout(() => {
+    voice.target = state.home?.managerId || null;
+    voice.text = text;
+    showReview();
+    if (note) toast(note);
+  }, 300);
+}
+
+async function renderSetup() {
+  const body = $("setupBody");
+  body.innerHTML = `<p>Loading…</p>`;
+  let key;
+  try { ({ key } = await rpc("shortcutKey", { rotate: false })); } catch (e) { body.innerHTML = `<p>${esc(e.message)}</p>`; return; }
+  const url = `${location.origin}${location.pathname}#/tell?k=${key}&t=`;
+  body.innerHTML = `
+    <p>A Shortcut that listens with Apple's own dictation, then hands the words to Pocket, which sends them to your manager thread after a 3-second countdown you can cancel.</p>
+    <h3>Build it once (about a minute)</h3>
+    <ol>
+      <li>Open <b>Shortcuts</b> → <b>+</b>. Name it <b>Tell Pocket</b> (Siri mishears "bb").</li>
+      <li>Tap the <b>ⓘ</b> and turn on <b>Show in Share Sheet</b>. Set it to receive <b>Text</b> and <b>URLs</b>. For "If there's no input", pick <b>Continue</b>.</li>
+      <li>Add <b>Dictate Text</b>. Set Stop Listening to <b>After Pause</b>.</li>
+      <li>Add <b>Text</b> and put in it: <b>Dictated Text</b>, a new line, then <b>Shortcut Input</b>.</li>
+      <li>Add <b>URL Encode</b> (it encodes that Text).</li>
+      <li>Add <b>Text</b> and paste the link below, then insert <b>URL Encoded Text</b> at the very end.</li>
+      <li>Add <b>Open URLs</b>.</li>
+    </ol>
+    <div class="urlbox" id="tellUrl">${esc(url)}</div>
+    <div class="btns"><button class="btn primary" id="copyUrl">Copy link</button><button class="btn" id="rotateKey">New key</button></div>
+    <h3>Then use it</h3>
+    <ol>
+      <li><b>Action Button:</b> Settings → Action Button → Shortcut → Tell Pocket.</li>
+      <li><b>Siri:</b> say "Hey Siri, Tell Pocket". With the phone locked, Siri will ask you to unlock before it opens the link.</li>
+      <li><b>Share sheet:</b> share a link or text → Tell Pocket, and say what to do with it.</li>
+    </ol>
+    <p>The link contains a private key: only links carrying it send without a tap. Anyone else's link just opens the review sheet. If the link leaks, tap New key and paste the new link into the Shortcut.</p>
+    <p>The Shortcut opens in your default browser (not the home-screen app, which iOS won't let links open into), so stay signed in to bb there.</p>`;
+  $("copyUrl").onclick = async () => {
+    try { await navigator.clipboard.writeText(url); toast("Link copied"); }
+    catch { const r = document.createRange(); r.selectNodeContents($("tellUrl")); getSelection().removeAllRanges(); getSelection().addRange(r); toast("Selected. Tap Copy."); }
+  };
+  $("rotateKey").onclick = async () => {
+    await rpc("shortcutKey", { rotate: true });
+    toast("New key. Update the link in your Shortcut.");
+    renderSetup();
+  };
+}
+
+// ---------- polling ----------
+function schedule(fn, ms, hash) {
+  clearTimeout(timer);
+  timer = setTimeout(() => {
+    if (document.hidden) return;
+    const here = location.hash || "";
+    if (hash === "home" ? (here === "" || here === "#" || here === "#/") : here === hash) fn();
+  }, ms);
+}
+
+route();
+</script>
+</body>
+</html>
