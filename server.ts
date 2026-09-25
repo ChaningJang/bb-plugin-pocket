@@ -234,6 +234,28 @@ export const rpcContract = defineRpcContract({
   rename: { input: z.object({ threadId, title: z.string().trim().min(1).max(200) }), output: ok },
   // ✨ in Rename: a short descriptive title from how the thread started and where it is.
   suggestTitle: { input: z.object({ threadId }), output: z.object({ title: z.string() }) },
+  // Thread mentions in messages (@thread:thr_…, bare thr_… ids) become chips
+  // with the thread's title. Unknown ids come back found:false.
+  threadRefs: {
+    input: z.object({ ids: z.array(threadId).max(60) }),
+    output: z.object({
+      threads: z.array(z.object({ id: z.string(), found: z.boolean(), title: z.string(), projectName: z.string(), archived: z.boolean() })),
+    }),
+  },
+  // File links in messages ([label](docs/x.png), absolute paths, thread-storage:…).
+  // Relative paths resolve against the thread's environment. ok:false = not a
+  // file link Pocket can open; found:null = on another machine, not checked.
+  fileRefs: {
+    input: z.object({ threadId, paths: z.array(z.string().min(1).max(1000)).max(40) }),
+    output: z.object({
+      files: z.array(z.object({ path: z.string(), ok: z.boolean(), found: z.boolean().nullable(), kind: z.string(), name: z.string() })),
+    }),
+  },
+  // A markdown file's text, for Pocket's own viewer.
+  fileText: {
+    input: z.object({ threadId, path: z.string().min(1).max(1000) }),
+    output: z.object({ found: z.boolean(), name: z.string(), text: z.string(), truncated: z.boolean() }),
+  },
   // Long press → "Make this the manager": where the home mic and the Shortcut send. null = automatic.
   setManager: { input: z.object({ threadId: threadId.nullable() }), output: ok },
   // Universal search: threads (titles and messages, archived included, via
@@ -318,6 +340,18 @@ const CAPTURE_WORKLET = `class PocketCapture extends AudioWorkletProcessor {
 registerProcessor("pocket-capture", PocketCapture);
 `;
 
+// Titles for thread mention chips. Titles change (rename, auto-title), so
+// entries expire; a miss is retried sooner in case the thread was just made.
+const REF_TTL = 5 * 60_000;
+const REF_MISS_TTL = 60_000;
+const refCache = new Map<string, { at: number; ref: { id: string; found: boolean; title: string; projectName: string; archived: boolean } }>();
+
+// bb returns preview URLs on the server's own address (127.0.0.1 here); only
+// the path is portable, so redirects stay on whatever origin the phone used.
+function previewPath(baseUrl: string): string {
+  try { return new URL(baseUrl).pathname.replace(/\/$/, ""); } catch { return baseUrl.replace(/\/$/, ""); }
+}
+
 function titleOf(t: { title?: string | null; titleFallback?: string | null }): string {
   const raw = (t.title || t.titleFallback || "Untitled").replace(/\s+/g, " ").trim();
   return raw.length > TITLE_MAX ? `${raw.slice(0, TITLE_MAX - 1)}…` : raw;
@@ -370,7 +404,7 @@ const KEEP_HOSTS = [
 const FILE_KINDS: Record<string, string> = {
   ".html": "page", ".htm": "page", ".pdf": "pdf",
   ".docx": "doc", ".doc": "doc", ".pptx": "slides", ".key": "slides", ".xlsx": "sheet", ".csv": "sheet",
-  ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image",
+  ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image", ".svg": "image", ".avif": "image",
   ".mp4": "video", ".mov": "video", ".m4a": "audio", ".mp3": "audio", ".md": "note",
 };
 
@@ -1276,6 +1310,78 @@ export default async function plugin(bb: BbPluginApi) {
     return ok;
   }
 
+  // ---- File links ---------------------------------------------------------
+  // Like bb web: a relative link is a file in the thread's environment, an
+  // absolute one is on the thread's machine, thread-storage:… is in the
+  // thread's storage folder.
+  const envCache = new Map<string, { at: number; path: string | null; hostId: string | null }>();
+  async function threadEnv(threadId: string) {
+    const hit = envCache.get(threadId);
+    if (hit && Date.now() - hit.at < 10 * 60_000) return hit;
+    const t = (await bb.sdk.threads.get({ threadId })) as unknown as Dto & { environmentId?: string | null };
+    let path = t.environmentPath ?? null, hostId = t.environmentHostId ?? null;
+    if (!path && t.environmentId) {
+      try {
+        const env = (await bb.sdk.environments.get({ environmentId: t.environmentId })) as unknown as { path?: string; hostId?: string };
+        path = env.path ?? null; hostId = env.hostId ?? hostId;
+      } catch { /* relative links stay unresolved */ }
+    }
+    const out = { at: Date.now(), path, hostId };
+    envCache.set(threadId, out);
+    return out;
+  }
+
+  type FileLink = { hostId: string | null; path: string; kind: string; name: string; local: boolean };
+  async function resolveLink(threadId: string, href: string): Promise<FileLink | null> {
+    let p = href.trim();
+    if (!p || /^(https?|mailto|tel|data|javascript):/i.test(p) || p.startsWith("#")) return null;
+    p = p.replace(/^file:\/\//, "").replace(/[?#].*$/, "").replace(/:\d+(:\d+)?$/, "");
+    try { p = decodeURIComponent(p); } catch { /* keep as-is */ }
+    const { primaryHostId } = (await bb.sdk.system.config()) as { primaryHostId?: string };
+    let hostId: string | null;
+    if (p.startsWith("thread-storage:")) {
+      const loc = (await bb.sdk.threads.storageLocation({ threadId })) as { hostId: string; storageRootPath: string };
+      hostId = loc.hostId;
+      p = join(loc.storageRootPath, p.slice("thread-storage:".length).replace(/^\/+/, ""));
+    } else {
+      const env = await threadEnv(threadId);
+      hostId = env.hostId;
+      if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+      else if (!isAbsolute(p)) {
+        if (!env.path || /^[a-z][a-z0-9+.-]*:/i.test(p)) return null;
+        p = join(env.path, p);
+      }
+    }
+    p = normalize(p);
+    if (p.endsWith("/")) return null;
+    const local = !hostId || hostId === primaryHostId;
+    return { hostId: local ? primaryHostId ?? null : hostId, path: p, kind: FILE_KINDS[extname(p).toLowerCase()] ?? "file", name: basename(p), local };
+  }
+
+  async function fileExists(f: FileLink): Promise<boolean | null> {
+    if (!f.local) return null; // another machine (a sleeping Mac would hang the check)
+    try { return (await stat(f.path)).isFile(); } catch { return false; }
+  }
+
+  async function readLinked(f: FileLink): Promise<Buffer> {
+    if (f.local) return readFile(f.path);
+    const r = (await bb.sdk.files.read({ hostId: f.hostId ?? undefined, path: f.path })) as { content: string; contentEncoding: "base64" | "utf8" };
+    return Buffer.from(r.content, r.contentEncoding);
+  }
+
+  // One preview per folder, reused until shortly before it expires.
+  const previewCache = new Map<string, { until: number; baseUrl: string }>();
+  async function previewUrl(f: FileLink): Promise<string> {
+    const key = `${f.hostId}:${dirname(f.path)}`;
+    let hit = previewCache.get(key);
+    if (!hit || hit.until < Date.now()) {
+      const preview = await bb.sdk.files.createPreview({ hostId: f.hostId ?? undefined, rootPath: dirname(f.path), ttlMs: 30 * 60_000 });
+      hit = { until: Date.now() + 25 * 60_000, baseUrl: previewPath(preview.baseUrl) };
+      previewCache.set(key, hit);
+    }
+    return `${hit.baseUrl}/${encodeURIComponent(basename(f.path))}`;
+  }
+
   // ---- RPC ----------------------------------------------------------------
   bb.rpc.register(rpcContract, {
     async home() {
@@ -1757,6 +1863,43 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
 
+    async fileRefs({ threadId, paths }) {
+      const files = await Promise.all([...new Set(paths)].map(async (path) => {
+        const f = await resolveLink(threadId, path).catch(() => null);
+        if (!f) return { path, ok: false, found: null, kind: "", name: "" };
+        return { path, ok: true, found: await fileExists(f), kind: f.kind, name: f.name };
+      }));
+      return { files };
+    },
+
+    async fileText({ threadId, path }) {
+      const f = await resolveLink(threadId, path).catch(() => null);
+      if (!f) return { found: false, name: "", text: "", truncated: false };
+      try {
+        const buf = await readLinked(f);
+        const MAX = 400_000;
+        return { found: true, name: f.name, text: buf.subarray(0, MAX).toString("utf8"), truncated: buf.length > MAX };
+      } catch {
+        return { found: false, name: f.name, text: "", truncated: false };
+      }
+    },
+
+    async threadRefs({ ids }) {
+      const names = await projectNames();
+      const threads = await Promise.all([...new Set(ids)].map(async (id) => {
+        const hit = refCache.get(id);
+        if (hit && Date.now() - hit.at < (hit.ref.found ? REF_TTL : REF_MISS_TTL)) return hit.ref;
+        let ref = { id, found: false, title: "", projectName: "", archived: false };
+        try {
+          const t = (await bb.sdk.threads.get({ threadId: id })) as unknown as Dto & { archivedAt?: number | null };
+          ref = { id, found: true, title: titleOf(t), projectName: names.get(t.projectId) ?? "", archived: Boolean(t.archivedAt) };
+        } catch {}
+        refCache.set(id, { at: Date.now(), ref });
+        return ref;
+      }));
+      return { threads };
+    },
+
     async search({ query }) {
       const [res, names] = await Promise.all([
         bb.sdk.threads.search({ query, limitPerGroup: "25" }) as Promise<any>,
@@ -1903,11 +2046,37 @@ export default async function plugin(bb: BbPluginApi) {
       const preview = await bb.sdk.files.createPreview({ hostId, rootPath: dirname(item.target), ttlMs: 30 * 60_000 });
       return new Response(null, {
         status: 302,
-        headers: { location: `${preview.baseUrl.replace(/\/$/, "")}/${encodeURIComponent(basename(item.target))}` },
+        headers: { location: `${previewPath(preview.baseUrl)}/${encodeURIComponent(basename(item.target))}` },
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return page("Can't open this file right now", `It lives on a machine bb can't reach (${msg.slice(0, 160)}). If that's the Mac, it's probably asleep.`, 503);
+    }
+  });
+
+  // A file linked in a message. Images come back as bytes (Pocket's viewer
+  // shows them); pages, PDFs and the rest go through a bb preview URL, the way
+  // bb web shows HTML. A missing file gets a quiet page, never an error.
+  const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml", ".avif": "image/avif" };
+  bb.http.route("GET", "/file", async (c) => {
+    const threadIdQ = c.req.query("t") ?? "";
+    const quiet = (title: string, body: string, status = 404) =>
+      new Response(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font:17px/1.45 -apple-system,system-ui;padding:28px;color:#75716a;background:#f6f5f1"><h2 style="margin:0 0 8px;color:#1c1b19">${title}</h2><p>${body}</p></body>`,
+        { status, headers: { "content-type": "text/html; charset=utf-8" } },
+      );
+    if (!/^thr_[a-z0-9]+$/.test(threadIdQ)) return quiet("File not found", "");
+    const f = await resolveLink(threadIdQ, c.req.query("p") ?? "").catch(() => null);
+    if (!f) return quiet("File not found", "");
+    const shown = f.path.replace(homedir(), "~").replace(/[<>&]/g, "");
+    if ((await fileExists(f)) === false) return quiet("File not found", `<code>${shown}</code> has been moved or deleted.`);
+    try {
+      const type = IMAGE_TYPES[extname(f.path).toLowerCase()];
+      if (type) return new Response(new Uint8Array(await readLinked(f)), { headers: { "content-type": type, "cache-control": "private, max-age=60", "content-security-policy": "sandbox" } });
+      return new Response(null, { status: 302, headers: { location: await previewUrl(f) } });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return quiet("Can't open this file right now", `It lives on a machine bb can't reach (${msg.slice(0, 160).replace(/[<>&]/g, "")}). If that's the Mac, it's probably asleep.`, 503);
     }
   });
 

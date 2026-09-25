@@ -26,6 +26,10 @@ or login: if you can open bb, you can open Pocket.
     long press any thread → *Make manager*. The manager row carries a mic tag.
 - **Threads:** your messages and the agent's final answer per turn, with no tool-call noise.
   - Answer the agent's questions with one tap, allow or deny steps, reply by typing or voice.
+  - **Thread mentions** (`@thread:thr_…`, or a bare thread id) show as chips with the thread's title. Tap one to
+    open that thread.
+  - **File links** in messages open: images full-screen (pinch to zoom), `.md` files in Pocket's reader, pages and
+    PDFs in a new tab through bb's preview. Relative paths resolve in the thread's folder; missing files say so.
   - **Model chip:** while you type, a chip above the reply box shows the thread's model. Tap it to switch model or
     reasoning level for the next turn.
   - **New thread:** pick the project, machine and model.

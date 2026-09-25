@@ -260,6 +260,29 @@
   .md th, .md td { border-bottom: 1px solid var(--line); padding: 6px 10px 6px 0; text-align: left; vertical-align: top; }
   .md th { font-weight: 600; }
   .md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+  /* File links in messages + the full-screen file viewer. pk-f* / #pkFileView names are unique on purpose. */
+  a.pk-flink { color: var(--blue); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a.pk-flink.pk-fmissing { color: var(--muted); text-decoration: none; }
+  a.pk-flink.pk-fmissing::after { content: " · not found"; font-size: .8em; color: var(--faint); }
+  #pkFileView { position: fixed; inset: 0; z-index: 28; display: flex; flex-direction: column; background: var(--bg); }
+  #pkFileView[hidden] { display: none; }
+  #pkFileView.pk-fvimage { background: #000; }
+  #pkFileView .pk-fvbar { display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-t) + 6px) 8px 6px 16px; flex: none; }
+  #pkFileView.pk-fvimage .pk-fvbar { position: absolute; top: 0; left: 0; right: 0; z-index: 1; background: linear-gradient(rgba(0,0,0,.55), transparent); color: #fff; }
+  #pkFileView .pk-fvname { flex: 1; min-width: 0; font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #pkFileView .pk-fvbtn { border: 0; background: none; color: inherit; padding: 8px 10px; font-size: 15px; font-weight: 600; }
+  #pkFileView .pk-fvclose { font-size: 26px; line-height: 1; padding: 4px 10px; }
+  #pkFileView .pk-fvstage { flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; }
+  #pkFileView .pk-fvstage img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: 0 0; will-change: transform; user-select: none; -webkit-user-drag: none; }
+  #pkFileView .pk-fvdoc { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px calc(var(--safe-b) + 28px); border-top: 1px solid var(--line); }
+  #pkFileView .pk-fvnote { color: var(--muted); padding: 40px 24px; text-align: center; }
+  /* Thread mention chips (@thread:thr_…). pk-tm* names are unique on purpose: page.html is one global stylesheet. */
+  a.pk-tmention { display: inline; padding: 1px 7px 1px 6px; border-radius: 6px; background: var(--code); color: var(--blue);
+    text-decoration: none; font-weight: 500; white-space: normal; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+  a.pk-tmention::before { content: "#"; opacity: .55; margin-right: 2px; font-weight: 400; }
+  a.pk-tmention:active { background: var(--tap); }
+  a.pk-tmention.pk-tmunknown { color: var(--muted); font: 14px/1.4 ui-monospace, "SF Mono", Menlo, monospace; }
+  a.pk-tmention .pk-tmarch { color: var(--muted); font-weight: 400; font-size: .85em; }
   .md .path { font: 14px ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
 
   /* Needs-you card */
@@ -600,6 +623,11 @@
 </style>
 </head>
 <body>
+<div id="pkFileView" hidden>
+  <div class="pk-fvbar"><div class="pk-fvname" id="pkFvName"></div><a class="pk-fvbtn" id="pkFvOpen" target="_blank" rel="noopener">Open</a><button class="pk-fvbtn pk-fvclose" id="pkFvClose" aria-label="Close">×</button></div>
+  <div class="pk-fvstage" id="pkFvStage" hidden></div>
+  <div class="pk-fvdoc md" id="pkFvDoc" hidden></div>
+</div>
 
 <!-- ============ HOME ============ -->
 <main id="home" class="view home" hidden>
@@ -814,16 +842,69 @@ const threadById = (id) => state.home?.threads.find((t) => t.id === id);
 
 // ---------- tiny markdown ----------
 function inline(s) {
-  s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  s = s.replace(/`([^`]+)`/g, (_, c) => THREAD_ID_ONLY.test(c) ? `<code class="pk-tmcode" data-tmid="${c}">${c}</code>` : `<code>${c}</code>`);
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, href) => {
     const raw = href.replace(/&amp;/g, "&");
     if (/^https?:\/\//i.test(raw)) return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
-    return `<span class="path">${label}</span>`;
+    const tid = fileCtx.threadId;
+    if (!tid) return `<span class="path">${label}</span>`;
+    const path = fileCtx.base && !/^(\/|~\/|thread-storage:|[a-z][a-z0-9+.-]*:)/i.test(raw) ? fileCtx.base + raw : raw;
+    const known = fileRefCache.get(`${tid}|${path}`);
+    if (known && !known.ok) return `<span class="path">${label}</span>`;
+    return `<a class="pk-flink${known?.found === false ? " pk-fmissing" : ""}" href="${fileUrl(tid, path)}" target="_blank" rel="noopener" data-fpath="${esc(path)}">${label}</a>`;
   });
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
-  return s;
+  return threadMentions(s);
+}
+
+// ---------- thread mentions ----------
+// Agents cite threads as @thread:thr_… (bb's mention syntax). Like the bb web
+// app: every @thread: mention is a chip with the thread's title; a bare
+// thr_… id in prose, or a code span holding only an id, becomes one only if
+// the thread exists. Links, code blocks and other code spans stay literal.
+const THREAD_ID = "thr_[23456789abcdefghijkmnpqrstuvwxyz]{10}";
+const THREAD_ID_ONLY = new RegExp(`^${THREAD_ID}$`);
+const MENTION_RE = new RegExp(`(^|[^\\w@/-])@thread:(thr_[a-z0-9]+)(?![\\w-])|(^|[^\\w@/.:-])(${THREAD_ID})(?![\\w-])`, "g");
+const tmCache = new Map(); // id → { at, found, title, projectName, archived }
+const TM_TTL = 5 * 60_000;
+
+function mentionChip(id) {
+  const r = tmCache.get(id);
+  if (!r?.found) return `<a class="pk-tmention pk-tmunknown" href="#/t/${id}" data-tmid="${id}">${id}</a>`;
+  const tip = esc(r.projectName ? `${r.title} · ${r.projectName}` : r.title);
+  return `<a class="pk-tmention" href="#/t/${id}" data-tmid="${id}" title="${tip}">${esc(r.title)}${r.archived ? `<span class="pk-tmarch"> · archived</span>` : ""}</a>`;
+}
+
+// Runs on already-escaped HTML; skips anything inside a tag, a link or code.
+function threadMentions(html) {
+  if (!html.includes("thr_")) return html;
+  return html.split(/(<a\b[\s\S]*?<\/a>|<code\b[\s\S]*?<\/code>|<span class="path">[\s\S]*?<\/span>|<[^>]*>)/).map((seg, i) => i % 2 ? seg : seg.replace(MENTION_RE, (m, pre, mid, rpre, rid) => {
+    if (mid) return pre + mentionChip(mid);
+    const r = tmCache.get(rid);
+    return rpre + (r?.found ? mentionChip(rid) : `<span class="pk-tmraw" data-tmid="${rid}">${rid}</span>`);
+  })).join("");
+}
+
+// Fetch titles for any mention in `root` not cached yet, then upgrade in place.
+async function hydrateMentions(root) {
+  const now = Date.now();
+  const ids = [...new Set([...root.querySelectorAll("[data-tmid]")].map((e) => e.dataset.tmid))]
+    .filter((id) => !(now - (tmCache.get(id)?.at ?? 0) < TM_TTL));
+  if (ids.length) {
+    try {
+      const r = await rpc("threadRefs", { ids: ids.slice(0, 60) });
+      for (const t of r.threads) tmCache.set(t.id, { ...t, at: Date.now() });
+    } catch { return; }
+  }
+  for (const el of root.querySelectorAll("[data-tmid]")) {
+    const id = el.dataset.tmid;
+    const r = tmCache.get(id);
+    if (!r) continue;
+    if (el.matches("a.pk-tmention")) { if (r.found && el.classList.contains("pk-tmunknown")) el.outerHTML = mentionChip(id); continue; }
+    if (r.found) el.outerHTML = mentionChip(id); // bare id or `id` code span that turned out to be a real thread
+  }
 }
 
 function md(src) {
@@ -884,6 +965,149 @@ function md(src) {
   }
   flush();
   return out.join("");
+}
+
+// ---------- file links ----------
+// [label](docs/x.png) etc. Relative paths resolve on the server against the
+// thread's environment, like bb web. Images and .md open in Pocket's own
+// viewer; pages, PDFs and the rest open through a bb preview in a new tab.
+const fileCtx = { threadId: null, base: "" };
+const fileRefCache = new Map(); // `${threadId}|${path}` → { at, ok, found, kind }
+const FILE_REF_TTL = 2 * 60_000;
+const fileUrl = (threadId, path) => `file?t=${threadId}&p=${encodeURIComponent(path)}`;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
+const fileName = (path) => path.replace(/[?#].*$/, "").split(/[/:]/).pop() || path;
+
+function mdForThread(threadId, text, base = "") {
+  fileCtx.threadId = threadId; fileCtx.base = base;
+  try { return md(text); } finally { fileCtx.threadId = null; fileCtx.base = ""; }
+}
+
+async function hydrateFiles(root, threadId) {
+  const now = Date.now();
+  const paths = [...new Set([...root.querySelectorAll("a.pk-flink[data-fpath]")].map((e) => e.dataset.fpath))]
+    .filter((p) => !(now - (fileRefCache.get(`${threadId}|${p}`)?.at ?? 0) < FILE_REF_TTL));
+  if (paths.length) {
+    try {
+      const r = await rpc("fileRefs", { threadId, paths: paths.slice(0, 40) });
+      for (const f of r.files) fileRefCache.set(`${threadId}|${f.path}`, { ...f, at: Date.now() });
+    } catch { return; }
+  }
+  for (const el of root.querySelectorAll("a.pk-flink[data-fpath]")) {
+    const f = fileRefCache.get(`${threadId}|${el.dataset.fpath}`);
+    if (!f) continue;
+    if (!f.ok) { el.outerHTML = `<span class="path">${el.innerHTML}</span>`; continue; }
+    el.classList.toggle("pk-fmissing", f.found === false);
+  }
+}
+
+// Taps on file links anywhere (messages, the .md viewer): missing → a quiet
+// toast; images and notes → the viewer; everything else opens natively.
+document.addEventListener("click", (e) => {
+  const a = e.target.closest?.("a.pk-flink[data-fpath]");
+  if (!a) return;
+  const threadId = fileView.threadId && a.closest("#pkFileView") ? fileView.threadId : state.thread?.id;
+  if (!threadId) return;
+  const path = a.dataset.fpath;
+  const f = fileRefCache.get(`${threadId}|${path}`);
+  if (f?.found === false) { e.preventDefault(); toast("File not found"); return; }
+  if (IMAGE_EXT.test(path.replace(/[?#].*$/, ""))) { e.preventDefault(); openImageView(threadId, path); return; }
+  if (/\.md$/i.test(path.replace(/[?#].*$/, ""))) { e.preventDefault(); openDocView(threadId, path); }
+});
+
+const fileView = { threadId: null, cleanup: null };
+function openFileView(threadId, path, mode) {
+  fileView.cleanup?.(); fileView.cleanup = null;
+  fileView.threadId = threadId;
+  const v = $("pkFileView");
+  v.className = mode === "image" ? "pk-fvimage" : "";
+  $("pkFvName").textContent = fileName(path);
+  $("pkFvOpen").href = fileUrl(threadId, path);
+  $("pkFvStage").hidden = mode !== "image";
+  $("pkFvDoc").hidden = mode === "image";
+  $("pkFvStage").innerHTML = ""; $("pkFvDoc").innerHTML = "";
+  v.hidden = false;
+  document.documentElement.style.overflow = "hidden";
+}
+function closeFileView() {
+  fileView.cleanup?.(); fileView.cleanup = null;
+  $("pkFileView").hidden = true;
+  $("pkFvStage").innerHTML = ""; $("pkFvDoc").innerHTML = "";
+  document.documentElement.style.overflow = "";
+}
+$("pkFvClose").onclick = closeFileView;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("pkFileView").hidden) closeFileView(); });
+
+async function openDocView(threadId, path) {
+  openFileView(threadId, path, "doc");
+  const doc = $("pkFvDoc");
+  doc.innerHTML = `<div class="pk-fvnote">Loading…</div>`;
+  try {
+    const r = await rpc("fileText", { threadId, path });
+    if (fileView.threadId !== threadId || $("pkFvName").textContent !== fileName(path)) return;
+    if (!r.found) { doc.innerHTML = `<div class="pk-fvnote">File not found</div>`; return; }
+    const base = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : path.startsWith("thread-storage:") ? "thread-storage:" : "";
+    doc.innerHTML = mdForThread(threadId, r.text, base) + (r.truncated ? `<p class="pk-fvnote">The rest is cut off here. Tap Open for the whole file.</p>` : "");
+    doc.scrollTop = 0;
+    hydrateMentions(doc);
+    hydrateFiles(doc, threadId);
+  } catch (e) { doc.innerHTML = `<div class="pk-fvnote">Couldn't load this file (${esc(e.message)}).</div>`; }
+}
+
+// Full-screen image: pinch to zoom, drag to pan when zoomed, double-tap to
+// toggle 2.5×. The transform is ours; the page's own zoom stays untouched.
+function openImageView(threadId, path) {
+  openFileView(threadId, path, "image");
+  const stage = $("pkFvStage");
+  const img = new Image();
+  img.alt = fileName(path);
+  img.draggable = false;
+  img.onerror = () => { stage.innerHTML = `<div class="pk-fvnote" style="color:#bbb">File not found</div>`; };
+  img.src = fileUrl(threadId, path);
+  stage.appendChild(img);
+  let scale = 1, x = 0, y = 0, start = null, lastTap = 0;
+  const apply = () => { img.style.transform = scale === 1 ? "" : `translate(${x}px, ${y}px) scale(${scale})`; };
+  const box = () => img.getBoundingClientRect();
+  // Zoom about a screen point (cx, cy), keeping it fixed.
+  const zoomAt = (next, cx, cy) => {
+    next = Math.min(6, Math.max(1, next));
+    if (next === 1) { scale = 1; x = 0; y = 0; apply(); return; }
+    const r = box();
+    const ox = r.left - x, oy = r.top - y; // untransformed origin on screen
+    const px = (cx - r.left) / scale, py = (cy - r.top) / scale; // point in image coords
+    x = cx - ox - px * next; y = cy - oy - py * next; scale = next; apply();
+  };
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = (t) => [(t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+  const onStart = (e) => {
+    if (e.touches.length === 2) start = { d: dist(e.touches), s: scale, m: mid(e.touches), x, y };
+    else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap < 280) { zoomAt(scale > 1 ? 1 : 2.5, e.touches[0].clientX, e.touches[0].clientY); lastTap = 0; start = null; return; }
+      lastTap = now;
+      start = { px: e.touches[0].clientX, py: e.touches[0].clientY, x, y };
+    }
+  };
+  const onMove = (e) => {
+    e.preventDefault();
+    if (!start) return;
+    if (e.touches.length === 2 && start.d) {
+      const [mx, my] = mid(e.touches);
+      zoomAt(start.s * dist(e.touches) / start.d, mx, my);
+      if (scale > 1) { x += mx - start.m[0]; y += my - start.m[1]; apply(); }
+      start.m = [mx, my];
+    } else if (e.touches.length === 1 && start.px !== undefined && scale > 1) {
+      x = start.x + e.touches[0].clientX - start.px; y = start.y + e.touches[0].clientY - start.py; apply();
+    }
+  };
+  const onEnd = (e) => { if (!e.touches.length) start = null; else if (e.touches.length === 1) start = { px: e.touches[0].clientX, py: e.touches[0].clientY, x, y }; };
+  stage.addEventListener("touchstart", onStart, { passive: true });
+  stage.addEventListener("touchmove", onMove, { passive: false });
+  stage.addEventListener("touchend", onEnd);
+  stage.addEventListener("touchcancel", onEnd);
+  // Desktop / trackpad: wheel zooms, a click on the backdrop closes.
+  stage.addEventListener("wheel", (e) => { e.preventDefault(); zoomAt(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY); }, { passive: false });
+  stage.addEventListener("click", (e) => { if (e.target === stage && scale === 1) closeFileView(); });
 }
 
 // ---------- audio session ----------
@@ -1223,6 +1447,7 @@ function route() {
     loadHome();
   }
 }
+window.addEventListener("hashchange", () => { if (!$("pkFileView").hidden) closeFileView(); });
 window.addEventListener("hashchange", route);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !recorder.active && location.hash !== "#/walk") route(); });
 // Back pops history when we got here from the list; opened directly on a
@@ -1916,14 +2141,16 @@ function renderThread(first) {
   for (const m of t.messages) {
     if (m.role === "user") {
       const long = m.text.length > 600 || m.text.split("\n").length > 8;
-      html.push(`<div class="msg user"><div><div class="bubble${long ? " long" : ""}">${esc(m.text)}</div><div class="when">${clock(m.at)}</div></div></div>`);
+      html.push(`<div class="msg user"><div><div class="bubble${long ? " long" : ""}">${threadMentions(esc(m.text))}</div><div class="when">${clock(m.at)}</div></div></div>`);
     } else {
-      html.push(`<div class="msg assistant"><div class="md">${md(m.text)}</div><div class="when">${clock(m.at)}</div></div>`);
+      html.push(`<div class="msg assistant"><div class="md">${mdForThread(t.id, m.text)}</div><div class="when">${clock(m.at)}</div></div>`);
     }
   }
   if (isWorking(t.status) && !t.interactions.length) html.push(`<div class="working"><span class="dot working" style="margin:0"></span>Working…</div>`);
   if (t.status === "error") html.push(`<div class="working" style="color:var(--red)">The last turn stopped with an error. Reply to try again, or open it in full bb.</div>`);
   $("messages").innerHTML = html.join("");
+  hydrateMentions($("messages"));
+  hydrateFiles($("messages"), t.id);
   $("messages").querySelectorAll(".bubble.long").forEach((b) => b.addEventListener("click", () => b.classList.remove("long"), { once: true }));
   renderCards(t);
   loadPills(t);
@@ -2817,7 +3044,7 @@ $("threadTrayClose").onclick = closeThreadTray;
 // Forgiving on purpose: a thumb swipe arcs, so it only has to be mostly
 // sideways. The decision is made on the move or, failing that, on release.
 (() => {
-  const SKIP = "pre, .table, #pills, .composer, .card, #sheetWrap";
+  const SKIP = "pre, .table, #pills, .composer, .card, #sheetWrap, #pkFileView";
   let x0 = 0, y0 = 0, dx = 0, dy = 0, live = false, fired = false, moves = 0, why = "", target = "";
   const decide = (trayOpen) => {
     // The tray lives on the right and is pulled in from the right: a leftward
