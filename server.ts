@@ -40,7 +40,14 @@ const message = z.object({
   role: z.enum(["user", "assistant"]),
   text: z.string(),
   at: z.number(),
+  // Files sent with the message (project attachments), shown under your bubble.
+  files: z.array(z.object({ path: z.string(), name: z.string(), image: z.boolean() })).optional(),
 });
+
+// A file picked in Pocket travels inside the send itself and is uploaded to the
+// thread's project on the server, so the page never names a server path.
+const upFile = z.object({ name: z.string().min(1).max(200), mime: z.string().max(100), data: z.string().min(1).max(34_000_000) });
+const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 const choice = z.object({ label: z.string(), value: z.string(), description: z.string().nullable() });
 
@@ -120,12 +127,14 @@ export const rpcContract = defineRpcContract({
     }),
   },
   send: {
-    input: z.object({ threadId, text: z.string().trim().min(1).max(20000) }),
+    input: z.object({ threadId, text: z.string().trim().max(20000), files: z.array(upFile).max(10).optional() })
+      .refine((v) => v.text.length > 0 || (v.files?.length ?? 0) > 0, "Nothing to send"),
     output: z.object({ delivery: z.string() }),
   },
   start: {
     input: z.object({
       projectId: z.string().min(1), text: z.string().trim().min(1).max(20000),
+      files: z.array(upFile).max(10).optional(),
       providerId: z.string().max(80).optional(), model: z.string().max(120).optional(), reasoningLevel: z.string().max(20).optional(),
       hostId: z.string().max(80).optional(),
     }),
@@ -1332,6 +1341,38 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   type FileLink = { hostId: string | null; path: string; kind: string; name: string; local: boolean };
+  // ---- attachments you send -------------------------------------------------
+  async function attach(projectId: string, files: Array<z.infer<typeof upFile>>) {
+    const decoded = files.map((f) => ({ ...f, bytes: Buffer.from(f.data, "base64") }));
+    const total = decoded.reduce((n, f) => n + f.bytes.length, 0);
+    if (total > MAX_UPLOAD_BYTES) throw new Error(`Attachments are ${Math.round(total / 1048576)} MB; the limit is 30 MB.`);
+    const out = [];
+    for (const f of decoded) {
+      const a = await bb.sdk.projects.attachments.upload({
+        projectId,
+        clientFile: new Uint8Array(f.bytes),
+        filename: basename(f.name).replace(/[\u0000-\u001f]/g, "") || "file",
+        ...(f.mime ? { mimeType: f.mime } : {}),
+      });
+      out.push(a.type === "localImage"
+        ? { type: "localImage" as const, path: a.path }
+        : { type: "localFile" as const, path: a.path, name: a.name, ...(a.mimeType ? { mimeType: a.mimeType } : {}), sizeBytes: a.sizeBytes });
+    }
+    bb.log.info(`attached ${out.length} file(s), ${Math.round(total / 1024)} KB, to ${projectId}`);
+    return out;
+  }
+
+  function rowFiles(row: Record<string, unknown>) {
+    const a = row.attachments as { localImagePaths?: string[]; localFilePaths?: string[] } | null | undefined;
+    if (!a) return [];
+    // bb stores uploads as name-<ms>-<random>.ext; show the name that was picked.
+    const shown = (path: string) => basename(path).replace(/-\d{13}-[a-z0-9]{6}(?=\.[^.]+$|$)/, "");
+    return [
+      ...(a.localImagePaths ?? []).map((path) => ({ path, name: shown(path), image: true })),
+      ...(a.localFilePaths ?? []).map((path) => ({ path, name: shown(path), image: false })),
+    ];
+  }
+
   async function resolveLink(threadId: string, href: string): Promise<FileLink | null> {
     let p = href.trim();
     if (!p || /^(https?|mailto|tel|data|javascript):/i.test(p) || p.startsWith("#")) return null;
@@ -1477,14 +1518,15 @@ export default async function plugin(bb: BbPluginApi) {
         if (row.kind !== "conversation") continue;
         const role = row.role;
         const text = typeof row.text === "string" ? row.text.trim() : "";
-        if ((role !== "user" && role !== "assistant") || !text) continue;
+        const files = role === "user" ? rowFiles(row) : [];
+        if ((role !== "user" && role !== "assistant") || (!text && !files.length)) continue;
         const at = typeof row.createdAt === "number" ? row.createdAt : 0;
         const turn = typeof row.turnId === "string" ? row.turnId : null;
         const prev = messages[messages.length - 1];
         if (role === "assistant" && prev?.role === "assistant" && turn !== null && turn === lastTurn) {
           messages[messages.length - 1] = { role, text, at };
         } else {
-          messages.push({ role, text, at });
+          messages.push({ role, text, at, ...(files.length ? { files } : {}) });
         }
         lastTurn = turn;
       }
@@ -1577,16 +1619,17 @@ export default async function plugin(bb: BbPluginApi) {
       };
     },
 
-    async send({ threadId, text }) {
+    async send({ threadId, text, files }) {
+      const attached = files?.length ? await attach((await bb.sdk.threads.get({ threadId })).projectId, files) : [];
       const result = await bb.sdk.threads.send({
         threadId,
         mode: "auto",
-        input: [{ type: "text", text, mentions: [] }],
+        input: [...(text ? [{ type: "text" as const, text, mentions: [] }] : []), ...attached],
       });
       return { delivery: result.delivery };
     },
 
-    async start({ projectId, text, providerId, model, reasoningLevel, hostId }) {
+    async start({ projectId, text, files, providerId, model, reasoningLevel, hostId }) {
       // A chosen machine runs in that machine's copy of the project.
       let environment: any = { type: "project-default" };
       if (hostId) {
@@ -1597,7 +1640,9 @@ export default async function plugin(bb: BbPluginApi) {
       const t = await bb.sdk.threads.spawn({
         projectId,
         environment,
-        prompt: text,
+        ...(files?.length
+          ? { input: [{ type: "text" as const, text, mentions: [] }, ...(await attach(projectId, files))] }
+          : { prompt: text }),
         origin: "app",
         ...(providerId ? { providerId } : {}),
         ...(model ? { model } : {}),
@@ -2077,6 +2122,35 @@ export default async function plugin(bb: BbPluginApi) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return quiet("Can't open this file right now", `It lives on a machine bb can't reach (${msg.slice(0, 160).replace(/[<>&]/g, "")}). If that's the Mac, it's probably asleep.`, 503);
+    }
+  });
+
+  // A file attached to one of your messages. Only paths that thread's own
+  // messages carry are served, read through bb's project attachment store.
+  bb.http.route("GET", "/att", async (c) => {
+    const threadIdQ = c.req.query("t") ?? "";
+    const path = c.req.query("p") ?? "";
+    const nope = () => new Response("Not found", { status: 404 });
+    if (!/^thr_[a-z0-9]+$/.test(threadIdQ) || !path) return nope();
+    try {
+      const [t, tl] = await Promise.all([
+        bb.sdk.threads.get({ threadId: threadIdQ }),
+        bb.sdk.threads.timeline({ threadId: threadIdQ, segmentLimit: "100" }),
+      ]);
+      const owned = (tl.rows as Array<Record<string, unknown>>).some((r) => rowFiles(r).some((f) => f.path === path));
+      if (!owned) return nope();
+      const r = await bb.sdk.projects.attachments.read({ projectId: t.projectId, path });
+      const name = basename(path).replace(/["\\\r\n]/g, "");
+      return new Response(new Uint8Array(r.bytes), {
+        headers: {
+          "content-type": r.mimeType || "application/octet-stream",
+          "content-disposition": `inline; filename="${name}"`,
+          "cache-control": "private, max-age=3600",
+          "content-security-policy": "sandbox",
+        },
+      });
+    } catch {
+      return nope();
     }
   });
 

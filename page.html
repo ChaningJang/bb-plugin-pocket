@@ -276,6 +276,24 @@
   #pkFileView .pk-fvstage img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: 0 0; will-change: transform; user-select: none; -webkit-user-drag: none; }
   #pkFileView .pk-fvdoc { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px calc(var(--safe-b) + 28px); border-top: 1px solid var(--line); }
   #pkFileView .pk-fvnote { color: var(--muted); padding: 40px 24px; text-align: center; }
+  /* Attachments: picked files above a composer, and files under your sent messages. pk-att* names are unique on purpose. */
+  .pk-attrow { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; }
+  .pk-attrow[hidden] { display: none; }
+  .pk-attchip { position: relative; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 2px; height: 60px; max-width: 170px;
+    padding: 0 26px 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 13px; }
+  .pk-attchip.pk-attimg { width: 60px; padding: 0; overflow: hidden; }
+  .pk-attchip.pk-attimg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pk-attname { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pk-attsize { color: var(--muted); font-size: 12px; }
+  .pk-attx { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+    background: rgba(0,0,0,.55); color: #fff; font-size: 15px; line-height: 22px; text-align: center; }
+  .pk-mfiles { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-top: 6px; }
+  .pk-mthumb { display: block; width: 132px; height: 132px; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+  .pk-mthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pk-mfile { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 8px 12px; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 14px; text-decoration: none; }
+  .pk-mfile span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pk-mfile svg, .pk-attbtn svg { width: 18px; height: 18px; display: inline-block; flex: none; }
   /* Thread mention chips (@thread:thr_…). pk-tm* names are unique on purpose: page.html is one global stylesheet. */
   a.pk-tmention { display: inline; padding: 1px 7px 1px 6px; border-radius: 6px; background: var(--code); color: var(--blue);
     text-decoration: none; font-weight: 500; white-space: normal; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
@@ -664,7 +682,10 @@
     <div class="recwhy" id="recWhy" hidden></div>
     <div class="pills" id="pills"></div>
     <div class="cmodel" id="cmodel" hidden><button id="modelChip"><span id="modelChipText"></span> ▾</button></div>
+    <div class="pk-attrow" id="replyAtt" hidden></div>
+    <input type="file" id="replyFiles" multiple hidden>
     <form class="field" id="replyForm">
+      <button type="button" class="round pk-attbtn" id="replyAttach" aria-label="Attach files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button>
       <button type="button" class="round" id="replyMic" aria-label="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></button>
       <textarea id="reply" rows="1" placeholder="Reply"></textarea>
       <div class="recbar" id="replyRec" hidden><span class="recdot"></span><span id="replyClock">0:00</span><span class="grow" id="replyRecNote">Listening…</span><button type="button" id="replyRecCancel">Cancel</button><button type="button" id="replyRecDone" style="color:var(--ink)">Done</button></div>
@@ -683,6 +704,9 @@
   <div class="body">
     <textarea id="prompt" placeholder="What should an agent do?"></textarea>
     <button class="dictate" id="newMic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg><span>Dictate</span></button>
+    <button class="dictate pk-attbtn" id="newAttach" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg><span>Attach</span></button>
+    <input type="file" id="newFiles" multiple hidden>
+    <div class="pk-attrow" id="newAtt" hidden style="margin-top:10px"></div>
     <div class="label">In</div>
     <div class="chips" id="chips"></div>
     <select id="allProjects" hidden></select>
@@ -1016,13 +1040,13 @@ document.addEventListener("click", (e) => {
 });
 
 const fileView = { threadId: null, cleanup: null };
-function openFileView(threadId, path, mode) {
+function openFileView(threadId, path, mode, url = fileUrl(threadId, path)) {
   fileView.cleanup?.(); fileView.cleanup = null;
   fileView.threadId = threadId;
   const v = $("pkFileView");
   v.className = mode === "image" ? "pk-fvimage" : "";
   $("pkFvName").textContent = fileName(path);
-  $("pkFvOpen").href = fileUrl(threadId, path);
+  $("pkFvOpen").href = url;
   $("pkFvStage").hidden = mode !== "image";
   $("pkFvDoc").hidden = mode === "image";
   $("pkFvStage").innerHTML = ""; $("pkFvDoc").innerHTML = "";
@@ -1056,14 +1080,14 @@ async function openDocView(threadId, path) {
 
 // Full-screen image: pinch to zoom, drag to pan when zoomed, double-tap to
 // toggle 2.5×. The transform is ours; the page's own zoom stays untouched.
-function openImageView(threadId, path) {
-  openFileView(threadId, path, "image");
+function openImageView(threadId, path, url = fileUrl(threadId, path)) {
+  openFileView(threadId, path, "image", url);
   const stage = $("pkFvStage");
   const img = new Image();
   img.alt = fileName(path);
   img.draggable = false;
   img.onerror = () => { stage.innerHTML = `<div class="pk-fvnote" style="color:#bbb">File not found</div>`; };
-  img.src = fileUrl(threadId, path);
+  img.src = url;
   stage.appendChild(img);
   let scale = 1, x = 0, y = 0, start = null, lastTap = 0;
   const apply = () => { img.style.transform = scale === 1 ? "" : `translate(${x}px, ${y}px) scale(${scale})`; };
@@ -2136,12 +2160,14 @@ function renderThread(first) {
   const hadCount = Number($("messages").dataset.count || 0);
   renderThreadHead();
   syncModelChip();
+  if (replyAtt.forThread && replyAtt.forThread !== t.id) replyAtt.clear(); // picked files belong to the thread they were picked in
   const html = [];
   if (t.messages.length >= 40) html.push(`<div class="older">Earlier messages are in full bb</div>`);
   for (const m of t.messages) {
     if (m.role === "user") {
       const long = m.text.length > 600 || m.text.split("\n").length > 8;
-      html.push(`<div class="msg user"><div><div class="bubble${long ? " long" : ""}">${threadMentions(esc(m.text))}</div><div class="when">${clock(m.at)}</div></div></div>`);
+      const bubble = m.text ? `<div class="bubble${long ? " long" : ""}">${threadMentions(esc(m.text))}</div>` : "";
+      html.push(`<div class="msg user"><div>${bubble}${msgFiles(t.id, m.files)}<div class="when">${clock(m.at)}</div></div></div>`);
     } else {
       html.push(`<div class="msg assistant"><div class="md">${mdForThread(t.id, m.text)}</div><div class="when">${clock(m.at)}</div></div>`);
     }
@@ -2372,21 +2398,102 @@ function armPill(b, { threadId, text, label, recommended, stale, source, after }
 const fullUrl = (t) => `/projects/${encodeURIComponent(t.projectId)}/threads/${encodeURIComponent(t.id)}`;
 function refreshSoon(id) { clearTimeout(timer); setTimeout(() => loadThread(id, false), 600); }
 
+// ---------- attachments ----------
+// Files picked with the paperclip ride inside the send; the server uploads them
+// to the thread's project. Big photos are shrunk to a 2048 px JPEG first so a
+// phone upload stays quick (HEIC becomes JPEG on the way).
+const ATT_MAX = 20 * 1048576, ATT_TOTAL = 25 * 1048576, ATT_COUNT = 10, ATT_EDGE = 2048;
+const kb = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+async function prepFile(file) {
+  let blob = file, name = file.name || "file", mime = file.type || "";
+  const photo = /^image\/(jpeg|png|heic|heif|webp)$/i.test(mime) || /\.(heic|heif)$/i.test(name);
+  if (photo && (file.size > 1.5 * 1048576 || /hei[cf]/i.test(mime + name))) {
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, ATT_EDGE / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      bmp.close?.();
+      const out = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
+      if (out) { blob = out; mime = "image/jpeg"; name = name.replace(/\.[^.]+$/, "") + ".jpg"; }
+    } catch { /* send the original */ }
+  }
+  const image = mime.startsWith("image/");
+  return { name, mime, blob, image, url: image ? URL.createObjectURL(blob) : null };
+}
+const b64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(",")[1] || "");
+  r.onerror = () => reject(new Error("Couldn't read a file."));
+  r.readAsDataURL(blob);
+});
+function attachList(el, onChange) {
+  const list = {
+    items: [], forThread: null,
+    async add(files, threadId = null) {
+      if (threadId !== list.forThread) list.clear();
+      list.forThread = threadId;
+      for (const f of files) {
+        if (list.items.length >= ATT_COUNT) { toast(`Up to ${ATT_COUNT} files at a time`); break; }
+        const it = await prepFile(f);
+        const total = list.items.reduce((n, x) => n + x.blob.size, 0) + it.blob.size;
+        if (it.blob.size > ATT_MAX) { toast(`${it.name} is over 20 MB`); continue; }
+        if (total > ATT_TOTAL) { toast("That's over 25 MB in one message"); continue; }
+        list.items.push(it);
+      }
+      list.render();
+    },
+    remove(i) { const [it] = list.items.splice(i, 1); if (it?.url) URL.revokeObjectURL(it.url); list.render(); },
+    clear() { for (const it of list.items) if (it.url) URL.revokeObjectURL(it.url); list.items = []; list.forThread = null; list.render(); },
+    render() {
+      el.hidden = !list.items.length;
+      el.innerHTML = list.items.map((it, i) => it.image
+        ? `<div class="pk-attchip pk-attimg"><img src="${it.url}" alt=""><button type="button" class="pk-attx" data-i="${i}" aria-label="Remove">×</button></div>`
+        : `<div class="pk-attchip"><span class="pk-attname">${esc(it.name)}</span><span class="pk-attsize">${kb(it.blob.size)}</span><button type="button" class="pk-attx" data-i="${i}" aria-label="Remove">×</button></div>`).join("");
+      el.querySelectorAll(".pk-attx").forEach((b) => b.onclick = () => list.remove(Number(b.dataset.i)));
+      onChange?.();
+    },
+    async payload() { return Promise.all(list.items.map(async (it) => ({ name: it.name, mime: it.mime, data: await b64(it.blob) }))); },
+  };
+  return list;
+}
+// Files under one of your sent messages: photos as thumbnails, the rest as chips.
+const attUrl = (threadId, path) => `att?t=${threadId}&p=${encodeURIComponent(path)}`;
+function msgFiles(threadId, files) {
+  if (!files?.length) return "";
+  return `<div class="pk-mfiles">${files.map((f) => f.image
+    ? `<a class="pk-mthumb" href="${attUrl(threadId, f.path)}" data-attimg="${esc(f.path)}" data-name="${esc(f.name)}" draggable="false"><img src="${attUrl(threadId, f.path)}" alt="${esc(f.name)}" loading="lazy" draggable="false"></a>`
+    : `<a class="pk-mfile" href="${attUrl(threadId, f.path)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg><span>${esc(f.name)}</span></a>`).join("")}</div>`;
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest?.("a[data-attimg]");
+  if (!a || !state.thread) return;
+  e.preventDefault();
+  openImageView(state.thread.id, a.dataset.name, attUrl(state.thread.id, a.dataset.attimg));
+});
+
 // composer
 const reply = $("reply");
 function grow(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.4) + "px"; }
-const syncSend = () => { $("sendBtn").disabled = !reply.value.trim() || recorder.active; };
+const replyAtt = attachList($("replyAtt"), () => syncSend());
+const syncSend = () => { $("sendBtn").disabled = (!reply.value.trim() && !replyAtt.items.length) || recorder.active || state.busy; };
+$("replyAttach").onclick = () => $("replyFiles").click();
+$("replyFiles").onchange = async (e) => { const files = [...e.target.files]; e.target.value = ""; if (state.thread) await replyAtt.add(files, state.thread.id); };
 reply.addEventListener("input", () => { grow(reply); syncSend(); });
 $("replyForm").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const text = reply.value.trim();
   const t = state.thread;
-  if (!text || !t || state.busy) return;
+  const withFiles = replyAtt.forThread === t?.id && replyAtt.items.length > 0;
+  if ((!text && !withFiles) || !t || state.busy) return;
   state.busy = true;
   $("sendBtn").disabled = true;
   try {
-    const r = await rpc("send", { threadId: t.id, text });
+    if (withFiles) toast(`Uploading ${replyAtt.items.length === 1 ? "1 file" : `${replyAtt.items.length} files`}…`);
+    const r = await rpc("send", { threadId: t.id, text, ...(withFiles ? { files: await replyAtt.payload() } : {}) });
     reply.value = ""; grow(reply);
+    if (withFiles) replyAtt.clear();
     if (r.delivery === "queued") toast("Queued. It goes in after the current step.");
     refreshSoon(t.id);
   } catch (e) {
@@ -2529,6 +2636,9 @@ $("newModel").onclick = async () => {
   if (pick) { state.newExec = pick; renderNewSetup(); }
 };
 const updateStart = () => { $("startBtn").disabled = !$("prompt").value.trim() || !state.project || state.busy || recorder.active; };
+const newAtt = attachList($("newAtt"));
+$("newAttach").onclick = () => $("newFiles").click();
+$("newFiles").onchange = async (e) => { const files = [...e.target.files]; e.target.value = ""; await newAtt.add(files, "new"); };
 $("prompt").addEventListener("input", updateStart);
 $("newMic").onclick = () => {
   if (recorder.active) return newDone?.();
@@ -2549,13 +2659,16 @@ $("startBtn").onclick = async () => {
   try {
     const x = state.newExec;
     const def = (state.newSetup?.machines || []).find((m) => m.isDefault);
+    if (newAtt.items.length) toast(`Uploading ${newAtt.items.length === 1 ? "1 file" : `${newAtt.items.length} files`}…`);
     const { threadId } = await rpc("start", {
       projectId: state.project, text,
+      ...(newAtt.items.length ? { files: await newAtt.payload() } : {}),
       ...(x ? { providerId: x.providerId, model: x.model, ...(x.reasoning ? { reasoningLevel: x.reasoning } : {}) } : {}),
       // Only name a machine when it isn't the project's default.
       ...(state.newHost && state.newHost !== def?.hostId ? { hostId: state.newHost } : {}),
     });
     $("prompt").value = "";
+    newAtt.clear();
     location.replace(`#/t/${threadId}`);
   } catch (e) {
     toast(e.message);

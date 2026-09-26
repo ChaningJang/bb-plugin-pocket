@@ -26,6 +26,8 @@ or login: if you can open bb, you can open Pocket.
     long press any thread → *Make manager*. The manager row carries a mic tag.
 - **Threads:** your messages and the agent's final answer per turn, with no tool-call noise.
   - Answer the agent's questions with one tap, allow or deny steps, reply by typing or voice.
+  - **Attach files** with the paperclip (photos, camera, or any file; also on New thread). Big photos are shrunk to
+    2048 px before upload. Files go to the thread's project like a desktop attachment, and show under your message.
   - **Thread mentions** (`@thread:thr_…`, or a bare thread id) show as chips with the thread's title. Tap one to
     open that thread.
   - **File links** in messages open: images full-screen (pinch to zoom), `.md` files in Pocket's reader, pages and
