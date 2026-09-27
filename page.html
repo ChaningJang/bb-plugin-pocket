@@ -2883,7 +2883,8 @@ const walk = { phase: "idle", ws: null, ctx: null, stream: null, node: null, loc
 
 function renderWalk() {
   const orb = $("worb");
-  orb.className = "worb" + (walk.phase === "live" ? (walk.micOff ? " paused" : " live") : "");
+  // Keep "speaking" through redraws (captions redraw often); only the audio gate sets it.
+  orb.className = "worb" + (walk.phase === "live" ? (walk.micOff ? " paused" : " live") : "") + (walk.speaking && walk.phase === "live" ? " speaking" : "");
   const c = $("walkControls");
   if (walk.phase === "idle") {
     c.innerHTML = `<button class="btn primary" id="wStart">Start talking</button>`;
@@ -3041,16 +3042,27 @@ async function startWalk() {
     ws.onmessage = ({ data }) => {
       if (data instanceof ArrayBuffer) {
         walk.trace.heard += data.byteLength;
+        // Talk to BB streams audio for nearly the whole call, silence included
+        // (9/27: 92-98% of each session), so only an audible chunk means BB is
+        // talking (RMS >= 0.008, about -42 dBFS; same gate as the iOS app).
+        // Measure before the buffer is handed to the worklet.
+        const pcm = new Int16Array(data);
+        let sum = 0;
+        for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
+        const audible = pcm.length > 0 && Math.sqrt(sum / pcm.length) / 32768 >= 0.008;
         if (!walk.quiet) node.port.postMessage({ type: "audio", buffer: data }, [data]);
-        $("worb").classList.add("speaking");
-        clearTimeout(walk.speakingTimer);
-        walk.speakingTimer = setTimeout(() => $("worb").classList.remove("speaking"), 450);
+        if (audible) {
+          walk.speaking = true;
+          $("worb").classList.add("speaking");
+          clearTimeout(walk.speakingTimer);
+          walk.speakingTimer = setTimeout(() => { walk.speaking = false; $("worb").classList.remove("speaking"); }, 1450);
+        }
         return;
       }
       const e = JSON.parse(data);
       if (e.type === "ready") { mark("ready"); ready = true; walk.liveAt = Date.now(); clearTimeout(giveUp); walk.phase = "live"; walkStatus("Listening. Talk whenever you like."); renderWalk(); keepAwake(); }
       if (e.type === "transcript") caption(e.speaker, e.text);
-      if (e.type === "flush") node.port.postMessage({ type: "flush" });
+      if (e.type === "flush") { node.port.postMessage({ type: "flush" }); clearTimeout(walk.speakingTimer); walk.speaking = false; $("worb").classList.remove("speaking"); }
       if (e.type === "playback") { walk.quiet = !e.enabled; renderWalk(); }
       if (e.type === "notice" && e.text) walkStatus(e.text);
       if (e.type === "lookup") walkStatus(e.state === "reading" ? "Checking BB…" : e.state === "failed" ? "That lookup didn't finish." : "Listening.");
@@ -3092,7 +3104,8 @@ function endWalk(message) {
   try { w.node?.disconnect(); } catch {}
   w.ctx?.close().catch(() => {});
   w.lock?.release?.().catch?.(() => {});
-  Object.assign(w, { phase: "idle", ws: null, ctx: null, stream: null, node: null, lock: null });
+  clearTimeout(w.speakingTimer);
+  Object.assign(w, { phase: "idle", ws: null, ctx: null, stream: null, node: null, lock: null, speaking: false });
   walkStatus(message);
   renderWalk();
 }
