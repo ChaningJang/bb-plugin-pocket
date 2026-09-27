@@ -136,7 +136,7 @@ export const rpcContract = defineRpcContract({
       projectId: z.string().min(1), text: z.string().trim().min(1).max(20000),
       files: z.array(upFile).max(10).optional(),
       providerId: z.string().max(80).optional(), model: z.string().max(120).optional(), reasoningLevel: z.string().max(20).optional(),
-      hostId: z.string().max(80).optional(),
+      hostId: z.string().max(80).optional(), permissionMode: z.enum(["auto", "full"]).optional(),
     }),
     output: z.object({ threadId: z.string() }),
   },
@@ -1629,7 +1629,7 @@ export default async function plugin(bb: BbPluginApi) {
       return { delivery: result.delivery };
     },
 
-    async start({ projectId, text, files, providerId, model, reasoningLevel, hostId }) {
+    async start({ projectId, text, files, providerId, model, reasoningLevel, hostId, permissionMode }) {
       // A chosen machine runs in that machine's copy of the project.
       let environment: any = { type: "project-default" };
       if (hostId) {
@@ -1647,6 +1647,7 @@ export default async function plugin(bb: BbPluginApi) {
         ...(providerId ? { providerId } : {}),
         ...(model ? { model } : {}),
         ...(reasoningLevel ? { reasoningLevel: reasoningLevel as any } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
       });
       return { threadId: t.id };
     },
