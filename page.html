@@ -714,6 +714,11 @@
     <div class="chips" id="machineChips"></div>
     <div class="label">Model</div>
     <button class="modelrow" id="newModel"><span id="newModelText">Project default</span><span class="go">Change</span></button>
+    <div class="label">Permissions</div>
+    <div class="chips" id="permChips">
+      <button class="chip on" data-perm="">Auto</button>
+      <button class="chip" data-perm="full">Full access</button>
+    </div>
   </div>
   <div class="go"><button class="btn primary" id="startBtn" disabled>Start</button></div>
 </main>
@@ -2629,6 +2634,12 @@ async function renderNewSetup() {
     ? execLabel(state.newExec)
     : `${[prov?.name || d.providerId, mdl?.name || d.model, d.reasoningLevel].filter(Boolean).join(" · ")} (project default)`;
 }
+// null = auto, as before. Full access isn't sticky: it resets after each start.
+function setPerm(v) {
+  state.newPerm = v || null;
+  $("permChips").querySelectorAll("[data-perm]").forEach((c) => c.classList.toggle("on", c.dataset.perm === (v || "")));
+}
+$("permChips").querySelectorAll("[data-perm]").forEach((b) => b.onclick = () => setPerm(b.dataset.perm));
 $("newModel").onclick = async () => {
   const d = state.newSetup?.defaults || {};
   const cur = state.newExec || { providerId: d.providerId, model: d.model, reasoning: d.reasoningLevel };
@@ -2666,9 +2677,11 @@ $("startBtn").onclick = async () => {
       ...(x ? { providerId: x.providerId, model: x.model, ...(x.reasoning ? { reasoningLevel: x.reasoning } : {}) } : {}),
       // Only name a machine when it isn't the project's default.
       ...(state.newHost && state.newHost !== def?.hostId ? { hostId: state.newHost } : {}),
+      ...(state.newPerm ? { permissionMode: state.newPerm } : {}),
     });
     $("prompt").value = "";
     newAtt.clear();
+    setPerm(null);
     location.replace(`#/t/${threadId}`);
   } catch (e) {
     toast(e.message);
