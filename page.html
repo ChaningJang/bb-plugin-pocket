@@ -1525,6 +1525,16 @@ document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("clic
 // It peels off what's on top first, like the back button would feel: file
 // viewer, sheet, artifacts tray; otherwise it goes back. Returns whether it did
 // anything, so the app only buzzes on a real back. Never while Walk is locked.
+// What a left-edge swipe would do right now, so the app can animate it:
+// "overlay" (a sheet, file viewer or tray closes), "page" (back to the list),
+// or "none". The app slides a snapshot card for "page" and calls pocketBack
+// underneath; if you let go early it restores location.hash itself.
+window.pocketBackKind = () => {
+  if (!$("pkWalkLock").hidden) return "none";
+  if (!$("pkFileView").hidden || !$("sheetWrap").hidden || !$("threadTray").hidden) return "overlay";
+  const h = location.hash;
+  return !h || h === "#" || h === "#/" ? "none" : "page";
+};
 window.pocketBack = () => {
   if (!$("pkWalkLock").hidden) return false;
   if (!$("pkFileView").hidden) { closeFileView(); return true; }
