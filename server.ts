@@ -17,9 +17,9 @@ import { parseEnv } from "node:util";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
-  APNS_HOST, JWT_TTL_MS, RateLimit, UNSAFE_PILL, apnsHeaders, apnsJwt, buildPayload, describeApproval, emptyState,
-  interactionNotice, isDeadToken, plainText, redacted, replyChoices, safePill, verdict,
-  type Choice, type Notice, type NotifState,
+  APNS_HOST, JWT_TTL_MS, RateLimit, UNSAFE_PILL, apnsHeaders, apnsJwt, buildPayload, buildTestPayload, describeApproval, emptyState,
+  inQuietHours, interactionNotice, isDeadToken, normalizePrefs, plainText, redacted, replyChoices, safePill, verdict,
+  type Choice, type Notice, type NotifState, type NotifyPrefs,
 } from "./notify.ts";
 
 const threadRow = z.object({
@@ -315,16 +315,42 @@ export const rpcContract = defineRpcContract({
     input: z.object({ token: z.string().regex(/^[0-9a-fA-F]{32,200}$/), env: z.enum(["sandbox", "production"]), bundleId: z.string().min(1).max(200) }),
     output: ok,
   },
-  // Sends one test notification to every registered device (or logs it, in a
-  // dry run) and says what APNs answered. Tapping it opens `threadId`, else the manager.
+  // Sends one TEST notification to every registered device (or logs it, in a
+  // dry run) and says what APNs answered. It names no thread and has no
+  // buttons, so it can never act on a thread. `threadId` is accepted and ignored.
   testNotification: {
     input: z.object({ threadId: threadId.optional() }).nullable(),
     output: z.object({
       dryRun: z.boolean(),
       devices: z.number(),
       results: z.array(z.object({ device: z.string(), env: z.string(), status: z.number(), reason: z.string().nullable() })),
+      payload: z.string(),
     }),
   },
+  // The Notifications screen: where push stands, your settings, the devices.
+  notifyStatus: {
+    input: z.null(),
+    output: z.object({
+      serverOn: z.boolean(),   // the plugin's `notifications` setting (bb plugin config)
+      keyReady: z.boolean(),   // an APNs key, key id and team id are set
+      dryRun: z.boolean(),     // nothing leaves the server: logged only
+      quietNow: z.boolean(),
+      prefs: z.object({
+        kinds: z.object({ approval: z.boolean(), question: z.boolean(), reply: z.boolean() }),
+        quiet: z.object({ on: z.boolean(), start: z.string(), end: z.string(), tz: z.string() }),
+      }),
+      devices: z.array(z.object({ id: z.string(), env: z.string(), bundleId: z.string(), matches: z.boolean(), addedAt: z.number(), lastSeen: z.number() })),
+    }),
+  },
+  setNotifyPrefs: {
+    input: z.object({
+      kinds: z.object({ approval: z.boolean(), question: z.boolean(), reply: z.boolean() }),
+      quiet: z.object({ on: z.boolean(), start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), tz: z.string().min(1).max(64) }),
+    }),
+    output: ok,
+  },
+  // Forget a registered device (by the last 6 characters of its token, as shown).
+  forgetDevice: { input: z.object({ id: z.string().regex(/^[0-9a-f]{6}$/) }), output: ok },
 });
 
 // The fields Pocket reads; both the list and get DTOs carry them.
@@ -1366,33 +1392,41 @@ export default async function plugin(bb: BbPluginApi) {
     });
   }
 
-  /** Send one notice to every registered device, or log it in a dry run. */
-  async function deliver(n: Notice): Promise<{ dryRun: boolean; results: Array<{ device: string; env: string; status: number; reason: string | null }> }> {
+  const loadPrefs = async (): Promise<NotifyPrefs> => normalizePrefs(await bb.storage.kv.get("notifyPrefs"));
+  async function pushState() {
     const cfg = await settings.get();
     const keyReady = Boolean(cfg.apnsKeyFile && cfg.apnsKeyId && cfg.apnsTeamId);
-    const dryRun = cfg.notificationsDryRun !== false || !keyReady;
+    return { cfg, keyReady, dryRun: cfg.notificationsDryRun !== false || !keyReady, want: (cfg.apnsBundleId || "").trim() };
+  }
+
+  /** Send one notice to every registered device, or log it in a dry run. */
+  async function deliver(n: Notice, opts: { passive?: boolean } = {}) {
+    const payload = buildPayload(n, opts);
+    return deliverPayload(payload, n.threadId, `${n.threadId} ${n.kind}${opts.passive ? " (quiet hours)" : ""}`, JSON.stringify(redacted(payload)));
+  }
+
+  async function deliverPayload(payload: object, collapseId: string, label: string, logged: string): Promise<{ dryRun: boolean; results: Array<{ device: string; env: string; status: number; reason: string | null }> }> {
+    const { cfg, keyReady, dryRun, want } = await pushState();
     const all = await devices();
-    const want = (cfg.apnsBundleId || "").trim();
     const targets = want ? all.filter((d) => d.bundleId === want) : all;
-    const payload = buildPayload(n);
     if (dryRun) {
-      bb.log.info(`notify (dry run${keyReady ? "" : ", no APNs key"}) ${n.threadId} ${n.kind} → ${targets.length} device(s): ${JSON.stringify(redacted(payload))}`);
+      bb.log.info(`notify (dry run${keyReady ? "" : ", no APNs key"}) ${label} → ${targets.length} device(s): ${logged}`);
       return { dryRun: true, results: targets.map((d) => ({ device: `…${d.token.slice(-6)}`, env: d.env, status: 0, reason: "dry run" })) };
     }
-    if (!targets.length) bb.log.info(`notify ${n.threadId} ${n.kind}: no registered devices`);
+    if (!targets.length) bb.log.info(`notify ${label}: no registered devices`);
     const body = JSON.stringify(payload);
     const results = [];
     const dead = new Set<string>();
     for (const d of targets) {
       let r: { status: number; reason: string | null };
       try {
-        const send = async () => apnsPost(APNS_HOST[d.env], d.token, apnsHeaders(d.bundleId, n.threadId, await providerToken(cfg.apnsKeyFile, cfg.apnsKeyId, cfg.apnsTeamId)), body);
+        const send = async () => apnsPost(APNS_HOST[d.env], d.token, apnsHeaders(d.bundleId, collapseId, await providerToken(cfg.apnsKeyFile, cfg.apnsKeyId, cfg.apnsTeamId)), body);
         r = await send();
         if (r.status === 403 && r.reason === "ExpiredProviderToken") { jwtCache = null; r = await send(); }
       } catch (e) {
         r = { status: 0, reason: e instanceof Error ? e.message.slice(0, 120) : "error" };
       }
-      bb.log.info(`notify ${n.threadId} ${n.kind} → …${d.token.slice(-6)} (${d.env}): ${r.status}${r.reason ? ` ${r.reason}` : ""}`);
+      bb.log.info(`notify ${label} → …${d.token.slice(-6)} (${d.env}): ${r.status}${r.reason ? ` ${r.reason}` : ""}`);
       if (isDeadToken(r.status, r.reason ?? undefined)) dead.add(d.token);
       results.push({ device: `…${d.token.slice(-6)}`, env: d.env, status: r.status, reason: r.reason });
     }
@@ -1471,9 +1505,14 @@ export default async function plugin(bb: BbPluginApi) {
     // Newest first under the rate limit; a thread whose notice has to wait
     // keeps its old state, so the next poll finds it again.
     found.sort((a, b) => b.n.forAt - a.n.forAt);
+    // Your settings: a kind you turned off is marked handled and never sent;
+    // in quiet hours it's sent silently (Notification Center, no sound).
+    const prefs = await loadPrefs();
+    const quiet = inQuietHours(prefs);
     for (const f of found) {
+      if (!prefs.kinds[f.n.kind]) { bb.log.info(`notify ${f.threadId} ${f.n.kind}: off in your settings, not sent`); continue; }
       if (!notifyLimit.take(Date.now())) { nextState.delete(f.threadId); continue; }
-      try { await deliver(f.n); } catch (e) { bb.log.warn(`notify ${f.threadId} ${f.n.kind}: ${e instanceof Error ? e.message : e}`); }
+      try { await deliver(f.n, { passive: quiet }); } catch (e) { bb.log.warn(`notify ${f.threadId} ${f.n.kind}: ${e instanceof Error ? e.message : e}`); }
     }
     for (const [id, st] of nextState) await bb.storage.kv.set(`notif:${id}`, st);
   }
@@ -2300,16 +2339,39 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
 
-    async testNotification(input) {
-      let id = input?.threadId ?? null;
-      if (!id) {
-        const list = (await bb.sdk.threads.list({ archived: false, limit: 300 })) as Dto[];
-        id = (await chooseManager(list, await managerIds().catch(() => new Set<string>()))).id ?? list[0]?.id ?? null;
-      }
-      if (!id) throw new Error("No thread to point the test notification at");
-      const n: Notice = { threadId: id, kind: "reply", title: "Pocket", body: "Test notification: notifications are working.", forAt: Date.now() };
-      const r = await deliver(n);
-      return { dryRun: r.dryRun, devices: r.results.length, results: r.results };
+    async testNotification() {
+      const payload = buildTestPayload();
+      const r = await deliverPayload(payload, "pocket-test", "test", JSON.stringify(payload));
+      return { dryRun: r.dryRun, devices: r.results.length, results: r.results, payload: JSON.stringify(payload, null, 2) };
+    },
+
+    async notifyStatus() {
+      const { cfg, keyReady, dryRun, want } = await pushState();
+      const prefs = await loadPrefs();
+      return {
+        serverOn: cfg.notifications === true,
+        keyReady,
+        dryRun,
+        quietNow: inQuietHours(prefs),
+        prefs,
+        devices: (await devices()).map((d) => ({ id: d.token.slice(-6), env: d.env, bundleId: d.bundleId, matches: !want || d.bundleId === want, addedAt: d.addedAt, lastSeen: d.lastSeen })),
+      };
+    },
+
+    async setNotifyPrefs(input) {
+      const prefs = normalizePrefs(input);
+      await bb.storage.kv.set("notifyPrefs", prefs);
+      bb.log.info(`notify prefs: ${JSON.stringify(prefs)}`);
+      return { ok: true };
+    },
+
+    async forgetDevice({ id }) {
+      const list = await devices();
+      const kept = list.filter((d) => d.token.slice(-6) !== id);
+      if (kept.length === list.length) throw new Error("No device with that id");
+      await bb.storage.kv.set("devices", kept);
+      bb.log.info(`device forgotten …${id}`);
+      return { ok: true };
     },
   });
 

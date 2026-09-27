@@ -115,3 +115,15 @@ token, and APNs's status, never the message text.
    `bb plugin rpc call pocket testNotification`. It points at your manager thread. To use a different thread, pass
    `--input-file` with `{"threadId": "thr_…"}`. The result shows APNs's answer for each device: `200` means Apple
    accepted it.
+
+## Your settings (Notifications screen, since v0.4.16)
+- Home → **Notifications →** (`#/notifications`): status (Off / Practice mode / On), per-kind switches (Approvals,
+  Questions, Your turn), quiet hours in your time zone, the registered phones (forget one), and a test.
+- Stored in plugin kv `notifyPrefs`. A kind that's off is marked handled and never sent. In quiet hours notifications
+  still go out, but silently: `aps["interruption-level"] = "passive"` and no `sound`; they land in Notification Center
+  without waking the screen, and everything still waits in Needs you.
+- RPCs: `notifyStatus` (null → status, prefs, devices by last 6 token characters), `setNotifyPrefs`, `forgetDevice {id}`.
+- **Test notification** (`testNotification`, also the screen's button): no thread, no category, no buttons
+  (`pocket.kind = "test"`), collapse id `pocket-test`. It can't act on any thread; `threadId` input is ignored.
+  In dry run it only logs and returns the payload it would send.
+

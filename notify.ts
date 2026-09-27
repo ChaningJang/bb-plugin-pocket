@@ -173,7 +173,60 @@ export class RateLimit {
 
 // ---- the APNs payload (the app codes against this; see NOTIFICATIONS.md) ---
 
-export function buildPayload(n: Notice) {
+// ---- your notification settings (Pocket's Notifications screen) -----------
+
+export type NotifyPrefs = {
+  kinds: Record<Kind, boolean>;
+  // Quiet hours, in your time zone: notifications still arrive, silently (no
+  // sound, screen stays dark) and everything still waits in Needs you.
+  quiet: { on: boolean; start: string; end: string; tz: string };
+};
+export const DEFAULT_PREFS: NotifyPrefs = {
+  kinds: { approval: true, question: true, reply: true },
+  quiet: { on: false, start: "22:00", end: "07:00", tz: "UTC" },
+};
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+export function normalizePrefs(x: unknown): NotifyPrefs {
+  const p = (x ?? {}) as Partial<NotifyPrefs>;
+  const k = (p.kinds ?? {}) as Partial<Record<Kind, boolean>>;
+  const q = (p.quiet ?? {}) as Partial<NotifyPrefs["quiet"]>;
+  let tz = typeof q.tz === "string" && q.tz ? q.tz : DEFAULT_PREFS.quiet.tz;
+  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { tz = DEFAULT_PREFS.quiet.tz; }
+  return {
+    kinds: { approval: k.approval !== false, question: k.question !== false, reply: k.reply !== false },
+    quiet: {
+      on: q.on === true,
+      start: typeof q.start === "string" && HHMM.test(q.start) ? q.start : DEFAULT_PREFS.quiet.start,
+      end: typeof q.end === "string" && HHMM.test(q.end) ? q.end : DEFAULT_PREFS.quiet.end,
+      tz,
+    },
+  };
+}
+/** Minutes since midnight in `tz`. */
+function localMinutes(now: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const h = Number(parts.find((x) => x.type === "hour")?.value ?? 0), m = Number(parts.find((x) => x.type === "minute")?.value ?? 0);
+  return h * 60 + m;
+}
+/** Inside quiet hours right now? Windows may cross midnight (22:00-07:00). start == end means off. */
+export function inQuietHours(prefs: NotifyPrefs, now = new Date()): boolean {
+  const q = prefs.quiet;
+  if (!q.on) return false;
+  const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const s = toMin(q.start), e = toMin(q.end), m = localMinutes(now, q.tz);
+  if (s === e) return false;
+  return s < e ? m >= s && m < e : m >= s || m < e;
+}
+
+/** The Notifications screen's test: no thread, no buttons, so it can't act on anything. */
+export function buildTestPayload() {
+  return {
+    aps: { alert: { title: "Pocket", body: "Test notification: this is what Pocket notifications look like." }, sound: "default" },
+    pocket: { kind: "test" },
+  };
+}
+
+export function buildPayload(n: Notice, opts: { passive?: boolean } = {}) {
   const pocket: Record<string, unknown> = { threadId: n.threadId, kind: n.kind, forAt: n.forAt };
   if (n.interactionId) pocket.interactionId = n.interactionId;
   if (n.questionId) pocket.questionId = n.questionId;
@@ -186,7 +239,8 @@ export function buildPayload(n: Notice) {
   return {
     aps: {
       alert: { title: clip(n.title, TITLE_MAX), body: clip(n.body, BODY_MAX) },
-      sound: "default",
+      // Quiet hours: delivered to Notification Center without sound or waking the screen.
+      ...(opts.passive ? { "interruption-level": "passive" } : { sound: "default" }),
       "thread-id": n.threadId,
       category: CATEGORY[n.kind],
       "mutable-content": 1,

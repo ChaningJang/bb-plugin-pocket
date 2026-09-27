@@ -131,3 +131,46 @@ test("dead tokens: 410 and BadDeviceToken drop the device; other errors don't", 
   assert.equal(isDeadToken(429, "TooManyRequests"), false);
   assert.equal(isDeadToken(200, undefined), false);
 });
+
+// ---- Notifications screen: settings, quiet hours, the safe test --------------
+import { DEFAULT_PREFS, buildTestPayload, inQuietHours, normalizePrefs } from "../notify.ts";
+
+test("settings default to everything on, quiet hours off, and clean up bad input", () => {
+  assert.deepEqual(normalizePrefs(undefined), DEFAULT_PREFS);
+  const p = normalizePrefs({ kinds: { reply: false }, quiet: { on: true, start: "25:00", end: "07:30", tz: "Not/AZone" } });
+  assert.deepEqual(p.kinds, { approval: true, question: true, reply: false });
+  assert.equal(p.quiet.start, "22:00", "an impossible time falls back to the default");
+  assert.equal(p.quiet.end, "07:30");
+  assert.equal(p.quiet.tz, "UTC", "an unknown time zone falls back to UTC");
+});
+
+test("quiet hours: overnight and same-day windows, in the given time zone", () => {
+  const at = (iso: string) => new Date(iso);
+  const night = normalizePrefs({ quiet: { on: true, start: "22:00", end: "07:00", tz: "America/Anchorage" } });
+  assert.equal(inQuietHours(night, at("2026-09-28T06:30:00Z")), true, "22:30 in Anchorage is quiet");
+  assert.equal(inQuietHours(night, at("2026-09-28T14:59:00Z")), true, "06:59 is quiet");
+  assert.equal(inQuietHours(night, at("2026-09-28T15:00:00Z")), false, "07:00 is not");
+  assert.equal(inQuietHours(night, at("2026-09-28T00:00:00Z")), false, "16:00 is not");
+  const lunch = normalizePrefs({ quiet: { on: true, start: "12:00", end: "13:00", tz: "UTC" } });
+  assert.equal(inQuietHours(lunch, at("2026-09-28T12:30:00Z")), true);
+  assert.equal(inQuietHours(lunch, at("2026-09-28T13:00:00Z")), false);
+  assert.equal(inQuietHours({ ...night, quiet: { ...night.quiet, on: false } }, at("2026-09-28T06:30:00Z")), false, "off means off");
+});
+
+test("quiet hours deliver silently: no sound, passive interruption level", () => {
+  const n = { threadId: "thr_quietreply", kind: "reply" as const, title: "T", body: "B", forAt: 1 };
+  const loud = buildPayload(n).aps as Record<string, unknown>;
+  const quiet = buildPayload(n, { passive: true }).aps as Record<string, unknown>;
+  assert.equal(loud.sound, "default");
+  assert.equal(quiet.sound, undefined);
+  assert.equal(quiet["interruption-level"], "passive");
+  assert.equal(quiet.category, "POCKET_REPLY", "buttons still there when you look");
+});
+
+test("the test notification names no thread and has no buttons", () => {
+  const p = buildTestPayload() as { aps: Record<string, unknown>; pocket: Record<string, unknown> };
+  assert.equal(p.pocket.threadId, undefined);
+  assert.equal(p.aps["thread-id"], undefined);
+  assert.equal(p.aps.category, undefined);
+  assert.equal(p.pocket.kind, "test");
+});

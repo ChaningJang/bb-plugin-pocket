@@ -191,7 +191,60 @@ test("testNotification: dry run reports each device", async () => {
   await plugin(w.bb);
   await w.rpc.registerDevice({ token: "cd".repeat(32), env: "production", bundleId: "com.example.pocket" });
   const r = await w.rpc.testNotification({ threadId: "thr_target" });
-  assert.deepEqual(r, { dryRun: true, devices: 1, results: [{ device: "…cdcdcd", env: "production", status: 0, reason: "dry run" }] });
-  const line = sent(w.logs)[0];
-  assert.equal(payloadOf(line).pocket.threadId, "thr_target");
+  assert.equal(r.dryRun, true);
+  assert.deepEqual(r.results, [{ device: "…cdcdcd", env: "production", status: 0, reason: "dry run" }]);
+  // The test never names a thread (the old one pointed at the manager, and its
+  // buttons could have sent there): no thread, no category, no buttons.
+  const p = payloadOf(sent(w.logs)[0]);
+  assert.equal(p.pocket.threadId, undefined);
+  assert.equal(p.aps.category, undefined);
+  assert.equal(JSON.parse(r.payload).pocket.kind, "test");
+});
+
+test("Notifications screen: a kind you turn off is never sent; quiet hours go silent", async (t) => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: T });
+  t.after(() => mock.timers.reset());
+  const w = world();
+  await plugin(w.bb);
+  // Replies off; quiet hours around the clock (00:00-23:59 UTC) so this poll is quiet.
+  await w.rpc.setNotifyPrefs({ kinds: { approval: true, question: true, reply: false }, quiet: { on: true, start: "00:00", end: "23:59", tz: "UTC" } });
+  const st = await w.rpc.notifyStatus(null);
+  assert.equal(st.prefs.kinds.reply, false);
+  assert.equal(st.quietNow, true);
+  w.add({ id: "thr_replyoff" }, { text: "Done, over to you", at: T - 1000 });
+  w.add({ id: "thr_asks", hasPendingInteraction: true, status: "waiting" });
+  w.interactions.set("thr_asks", [{ id: "int_1", status: "pending", createdAt: T - 500, payload: { kind: "approval", reason: null, subject: { kind: "command", command: "ls" } } }]);
+  const ac = new AbortController();
+  const running = w.services.get("notify")!.start(ac.signal);
+  mock.timers.tick(5_000);
+  await settle();
+  const lines = sent(w.logs);
+  assert.ok(!lines.some((l) => l.includes("thr_replyoff")), "replies are off: nothing sent");
+  assert.ok(w.logs.some((l) => l.includes("thr_replyoff reply: off in your settings")));
+  const approval = lines.find((l) => l.includes("thr_asks"));
+  assert.ok(approval, "approvals still on");
+  assert.match(approval!, /quiet hours/);
+  assert.equal(payloadOf(approval!).aps["interruption-level"], "passive");
+  // And it isn't retried once quiet hours or settings change: handled means handled.
+  await w.rpc.setNotifyPrefs({ kinds: { approval: true, question: true, reply: true }, quiet: { on: false, start: "22:00", end: "07:00", tz: "UTC" } });
+  mock.timers.tick(20_000);
+  await settle();
+  assert.equal(sent(w.logs).length, lines.length);
+  ac.abort();
+  await running;
+});
+
+test("Notifications screen: devices are listed by token tail and can be forgotten", async () => {
+  const w = world();
+  await plugin(w.bb);
+  await w.rpc.registerDevice({ token: "ab".repeat(32), env: "sandbox", bundleId: "com.example.pocket" });
+  await w.rpc.registerDevice({ token: "cd".repeat(32), env: "production", bundleId: "com.example.pocket" });
+  let st = await w.rpc.notifyStatus(null);
+  assert.deepEqual(st.devices.map((d: any) => d.id), ["ababab", "cdcdcd"]);
+  assert.equal(st.dryRun, true);
+  assert.equal(st.keyReady, false);
+  await w.rpc.forgetDevice({ id: "ababab" });
+  st = await w.rpc.notifyStatus(null);
+  assert.deepEqual(st.devices.map((d: any) => d.id), ["cdcdcd"]);
+  await assert.rejects(() => w.rpc.forgetDevice({ id: "ffffff" }));
 });

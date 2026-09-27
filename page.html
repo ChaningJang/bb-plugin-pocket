@@ -650,6 +650,30 @@
   .setup .urlbox { font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 10px; padding: 10px; overflow-wrap: anywhere; margin: 8px 0; }
   .setup h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 4px; }
   .setuplink { display: block; margin: 26px 20px 0; color: var(--muted); font-size: 14px; text-decoration: none; }
+  .setuplink + .setuplink { margin-top: 12px; }
+  /* Notifications screen. pk-nt* names are unique on purpose. */
+  .pk-ntstatus { border-radius: 14px; padding: 12px 14px; margin: 6px 0 4px; background: var(--surface); border: 1px solid var(--line); }
+  .pk-ntstatus b { display: block; font-size: 16px; margin-bottom: 2px; }
+  .pk-ntstatus span { color: var(--muted); font-size: 14px; }
+  .pk-ntstatus.live b { color: var(--green); }
+  .pk-ntstatus.practice b { color: var(--amber); }
+  .pk-ntrow { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .pk-ntrow:last-child { border-bottom: 0; }
+  .pk-ntrow .pk-nttext { flex: 1; min-width: 0; }
+  .pk-ntrow .pk-nttext div { font-size: 16px; }
+  .pk-ntrow .pk-nttext small { color: var(--muted); font-size: 13px; }
+  .pk-ntrow input[type="checkbox"] { width: 44px; height: 26px; flex: none; accent-color: var(--green); }
+  .pk-nttimes { display: flex; gap: 10px; align-items: center; padding: 6px 0 12px; }
+  .pk-nttimes label { flex: 1; font-size: 13px; color: var(--muted); }
+  .pk-nttimes input { display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 16px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+  .pk-ntdev { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .pk-ntdev:last-child { border-bottom: 0; }
+  .pk-ntdev .pk-nttext { flex: 1; }
+  .pk-ntdev small { color: var(--muted); font-size: 13px; display: block; }
+  .pk-ntdev button { border: 0; background: none; color: var(--red); font-weight: 600; font-size: 14px; padding: 6px; }
+  .pk-nttest { margin-top: 8px; }
+  .pk-ntresult { font-size: 14px; color: var(--muted); margin-top: 10px; }
+  .pk-ntresult pre { font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 10px; padding: 10px; overflow-x: auto; margin-top: 6px; color: var(--ink); }
 
   .toast {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 150px);
@@ -789,6 +813,15 @@
     <span></span>
   </div>
   <div class="setup" id="setupBody"></div>
+</main>
+
+<main id="notifs" class="view" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">Notifications</div></div>
+    <span></span>
+  </div>
+  <div class="setup" id="notifsBody"><p>Loading…</p></div>
 </main>
 
 <!-- ============ WALK ============ -->
@@ -1508,8 +1541,8 @@ function route() {
   // resets the scroll to the top: that was threads "jumping to the top"
   // every time you came back to Pocket from another app.
   const target = m ? "thread" : h === "#/new" ? "new" : h === "#/artifacts" ? "artifacts" : h.startsWith("#/tell") ? "tell"
-    : h === "#/shortcut" ? "shortcut" : h === "#/walk" ? "walk" : h === "#/drafts" ? "drafts" : "home";
-  for (const id of ["home", "thread", "new", "artifacts", "walk", "tell", "shortcut", "drafts"]) if ((id !== target) !== $(id).hidden) $(id).hidden = id !== target;
+    : h === "#/shortcut" ? "shortcut" : h === "#/walk" ? "walk" : h === "#/drafts" ? "drafts" : h === "#/notifications" ? "notifs" : "home";
+  for (const id of ["home", "thread", "new", "artifacts", "walk", "tell", "shortcut", "drafts", "notifs"]) if ((id !== target) !== $(id).hidden) $(id).hidden = id !== target;
   $("dock").hidden = target !== "home";
   if (pillSend) { clearTimeout(pillSend.timer); pillSend.restore(); pillSend = null; $("pills").dataset.key = ""; }
   if (m) {
@@ -1554,6 +1587,9 @@ function route() {
   } else if (h === "#/shortcut") {
     $("shortcut").hidden = false;
     renderSetup();
+  } else if (h === "#/notifications") {
+    $("notifs").hidden = false;
+    loadNotifs();
   } else if (h === "#/walk") {
     $("walk").hidden = false;
     renderWalk();
@@ -1669,6 +1705,7 @@ function renderHome() {
     if (rest.length > shownRest.length) parts.push(`<button class="more" id="moreBtn">Show more</button>`);
   }
   parts.push(`<a class="setuplink" href="#/shortcut">Talk to bb from Siri or the Action Button →</a>`);
+  parts.push(`<a class="setuplink" href="#/notifications">Notifications →</a>`);
   $("lists").innerHTML = parts.join("");
   $("lists").querySelectorAll("li[data-id]").forEach(attachSwipe);
   $("lists").querySelectorAll("[data-rec]").forEach((b) => {
@@ -3116,6 +3153,83 @@ async function keepAwake() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && walk.phase === "live" && !walk.lock) keepAwake(); });
 window.addEventListener("pagehide", () => { if (walk.phase !== "idle") endWalk("Session ended."); });
+
+// ---------- notifications screen ----------
+// What the Pocket iPhone app will notify about, quiet hours, the phones that
+// registered, and a safe test (no thread, no buttons). Push itself is switched
+// on on the bb server; until there's an Apple key everything is a practice
+// run that only logs what it would send.
+const nt = { status: null, saveTimer: 0, result: "" };
+const NT_KINDS = [
+  ["approval", "Approvals", "An agent wants permission to do something"],
+  ["question", "Questions", "An agent asks you to pick an option"],
+  ["reply", "Your turn", "An agent finished and is waiting on you"],
+];
+async function loadNotifs() {
+  if (!nt.status) $("notifsBody").innerHTML = `<p>Loading…</p>`;
+  try { nt.status = await rpc("notifyStatus", null); renderNotifs(); }
+  catch (e) { $("notifsBody").innerHTML = `<p class="fail">Couldn't load notification settings (${esc(e.message)}).</p>`; }
+}
+function ntStatusCard(st) {
+  if (st.serverOn && !st.dryRun) return `<div class="pk-ntstatus live"><b>On</b><span>Notifications go to the phones below.</span></div>`;
+  if (st.serverOn) return `<div class="pk-ntstatus practice"><b>Practice mode</b><span>Nothing is sent yet: Pocket only logs what it would send. ${st.keyReady ? "Dry run is switched on in Pocket's settings." : "It needs an Apple push key, which comes with your paid Apple Developer membership."}</span></div>`;
+  return `<div class="pk-ntstatus"><b>Off</b><span>Notifications are switched off on your bb server${st.keyReady ? "" : ", and they need an Apple push key first (it comes with a paid Apple Developer membership)"}. Your settings here still save.</span></div>`;
+}
+function renderNotifs() {
+  const st = nt.status;
+  if (!st) return;
+  const p = st.prefs;
+  const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || p.quiet.tz;
+  $("notifsBody").innerHTML = `
+    ${ntStatusCard(st)}
+    <h3>Notify me about</h3>
+    ${NT_KINDS.map(([k, name, what]) => `<div class="pk-ntrow"><div class="pk-nttext"><div>${name}</div><small>${what}</small></div><input type="checkbox" switch data-kind="${k}" ${p.kinds[k] ? "checked" : ""} aria-label="${name}"></div>`).join("")}
+    <h3>Quiet hours</h3>
+    <div class="pk-ntrow"><div class="pk-nttext"><div>Quiet hours</div><small>${st.quietNow ? "On now: " : ""}notifications arrive silently, and everything still waits in Needs you</small></div><input type="checkbox" switch id="ntQuiet" ${p.quiet.on ? "checked" : ""} aria-label="Quiet hours"></div>
+    <div class="pk-nttimes" id="ntTimes" ${p.quiet.on ? "" : "hidden"}>
+      <label>From<input type="time" id="ntStart" value="${esc(p.quiet.start)}"></label>
+      <label>To<input type="time" id="ntEnd" value="${esc(p.quiet.end)}"></label>
+    </div>
+    <p style="font-size:13px;margin:0">Times are in ${esc(zone)}.</p>
+    <h3>Phones</h3>
+    ${st.devices.length ? st.devices.map((d) => `<div class="pk-ntdev"><div class="pk-nttext">iPhone ending …${esc(d.id)}<small>${d.env === "production" ? "App Store / TestFlight build" : "Development build"} · last seen ${ago(d.lastSeen)}${d.matches ? "" : " · a different app"}</small></div><button data-forget="${esc(d.id)}">Forget</button></div>`).join("")
+      : `<p>No phones yet. Open the Pocket iPhone app while signed in, and allow notifications when it asks.</p>`}
+    <h3>Test</h3>
+    <p style="margin:0">Sends a test notification to the phones above. It isn't about any thread and has no buttons, so it can't do anything.</p>
+    <button class="btn pk-nttest" id="ntTest">Send test notification</button>
+    <div class="pk-ntresult" id="ntResult">${nt.result}</div>`;
+  $("notifsBody").querySelectorAll("[data-kind]").forEach((c) => c.onchange = () => { st.prefs.kinds[c.dataset.kind] = c.checked; buzz("light"); saveNotifs(); });
+  $("ntQuiet").onchange = () => { st.prefs.quiet.on = $("ntQuiet").checked; $("ntTimes").hidden = !st.prefs.quiet.on; buzz("light"); saveNotifs(); };
+  for (const id of ["ntStart", "ntEnd"]) $(id).onchange = () => { if ($(id).value) { st.prefs.quiet[id === "ntStart" ? "start" : "end"] = $(id).value.slice(0, 5); saveNotifs(); } };
+  $("notifsBody").querySelectorAll("[data-forget]").forEach((b) => b.onclick = async () => {
+    if (!confirm(`Stop notifications to the iPhone ending …${b.dataset.forget}? It registers again next time the app opens.`)) return;
+    try { await rpc("forgetDevice", { id: b.dataset.forget }); await loadNotifs(); } catch (e) { toast(e.message); }
+  });
+  $("ntTest").onclick = testNotif;
+}
+function saveNotifs() {
+  clearTimeout(nt.saveTimer);
+  nt.saveTimer = setTimeout(async () => {
+    const p = nt.status.prefs;
+    p.quiet.tz = Intl.DateTimeFormat().resolvedOptions().timeZone || p.quiet.tz;
+    try { await rpc("setNotifyPrefs", p); toast("Saved"); const fresh = await rpc("notifyStatus", null); nt.status.quietNow = fresh.quietNow; }
+    catch (e) { toast(`Couldn't save (${e.message})`); loadNotifs(); }
+  }, 350);
+}
+async function testNotif() {
+  const b = $("ntTest");
+  b.disabled = true;
+  try {
+    const r = await rpc("testNotification", null);
+    const n = r.devices;
+    nt.result = r.dryRun
+      ? `<b>Practice run:</b> it would go to ${n === 1 ? "1 phone" : `${n} phones`}. Nothing was sent. This is what would be sent:<pre>${esc(r.payload)}</pre>`
+      : `Sent to ${n === 1 ? "1 phone" : `${n} phones`}: ${r.results.map((x) => `…${esc(x.device.replace(/^…/, ""))} ${x.status === 200 ? "delivered to Apple" : esc(`${x.status} ${x.reason || ""}`)}`).join(", ") || "no phones registered"}.`;
+    $("ntResult").innerHTML = nt.result;
+  } catch (e) { toast(e.message); }
+  finally { b.disabled = false; }
+}
 
 // ---------- drafts ----------
 const WEEK = 7 * 86400000;
