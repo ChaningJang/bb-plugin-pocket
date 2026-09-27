@@ -673,6 +673,16 @@
   .pk-ntdev button { border: 0; background: none; color: var(--red); font-weight: 600; font-size: 14px; padding: 6px; }
   .pk-nttest { margin-top: 8px; }
   .pk-ntresult { font-size: 14px; color: var(--muted); margin-top: 10px; }
+  .pk-abcard { border-radius: 14px; padding: 12px 14px; margin: 6px 0 4px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; }
+  .pk-abcard b { font-weight: 600; }
+  .pk-abcard small { color: var(--muted); font-size: 13px; display: block; margin-top: 2px; }
+  .pk-abcard.pk-abnew { border-color: var(--amber); }
+  .pk-abcard.pk-abnew > b { color: var(--amber); }
+  .pk-ablist { margin: 6px 0 10px; padding-left: 1.2em; }
+  .pk-ablist li { margin: 6px 0; }
+  .pk-abmd h2 { font-size: 15px; margin: 16px 0 4px; }
+  .pk-abmd ul { margin: 4px 0; }
+  #aboutBody details summary { color: var(--muted); font-size: 14px; padding: 10px 0; }
   .pk-ntresult pre { font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); border-radius: 10px; padding: 10px; overflow-x: auto; margin-top: 6px; color: var(--ink); }
 
   .toast {
@@ -813,6 +823,15 @@
     <span></span>
   </div>
   <div class="setup" id="setupBody"></div>
+</main>
+
+<main id="about" class="view" hidden>
+  <div class="bar">
+    <button class="icon-btn" data-back aria-label="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div class="head"><div class="t">About &amp; what's new</div></div>
+    <span></span>
+  </div>
+  <div class="setup" id="aboutBody"><p>Loading…</p></div>
 </main>
 
 <main id="notifs" class="view" hidden>
@@ -1541,8 +1560,8 @@ function route() {
   // resets the scroll to the top: that was threads "jumping to the top"
   // every time you came back to Pocket from another app.
   const target = m ? "thread" : h === "#/new" ? "new" : h === "#/artifacts" ? "artifacts" : h.startsWith("#/tell") ? "tell"
-    : h === "#/shortcut" ? "shortcut" : h === "#/walk" ? "walk" : h === "#/drafts" ? "drafts" : h === "#/notifications" ? "notifs" : "home";
-  for (const id of ["home", "thread", "new", "artifacts", "walk", "tell", "shortcut", "drafts", "notifs"]) if ((id !== target) !== $(id).hidden) $(id).hidden = id !== target;
+    : h === "#/shortcut" ? "shortcut" : h === "#/walk" ? "walk" : h === "#/drafts" ? "drafts" : h === "#/notifications" ? "notifs" : h === "#/about" ? "about" : "home";
+  for (const id of ["home", "thread", "new", "artifacts", "walk", "tell", "shortcut", "drafts", "notifs", "about"]) if ((id !== target) !== $(id).hidden) $(id).hidden = id !== target;
   $("dock").hidden = target !== "home";
   if (pillSend) { clearTimeout(pillSend.timer); pillSend.restore(); pillSend = null; $("pills").dataset.key = ""; }
   if (m) {
@@ -1590,6 +1609,9 @@ function route() {
   } else if (h === "#/notifications") {
     $("notifs").hidden = false;
     loadNotifs();
+  } else if (h === "#/about") {
+    $("about").hidden = false;
+    loadAbout();
   } else if (h === "#/walk") {
     $("walk").hidden = false;
     renderWalk();
@@ -1706,6 +1728,7 @@ function renderHome() {
   }
   parts.push(`<a class="setuplink" href="#/shortcut">Talk to bb from Siri or the Action Button →</a>`);
   parts.push(`<a class="setuplink" href="#/notifications">Notifications →</a>`);
+  parts.push(`<a class="setuplink" href="#/about">About &amp; what's new →</a>`);
   $("lists").innerHTML = parts.join("");
   $("lists").querySelectorAll("li[data-id]").forEach(attachSwipe);
   $("lists").querySelectorAll("[data-rec]").forEach((b) => {
@@ -3153,6 +3176,68 @@ async function keepAwake() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && walk.phase === "live" && !walk.lock) keepAwake(); });
 window.addEventListener("pagehide", () => { if (walk.phase !== "idle") endWalk("Session ended."); });
+
+// ---------- about & what's new ----------
+// Two things update separately: this page and Pocket's server (live as soon as
+// bb reloads the plugin) and the iPhone app (needs an install). The app reports
+// its installed build over the bridge; its CHANGELOG.md says what each build
+// holds, so this screen can show "on your phone" vs "built, not installed yet".
+function parseIosChangelog(md) {
+  const out = { planned: [], builds: [] };
+  let cur = null;
+  for (const raw of String(md || "").split("\n")) {
+    const line = raw.trim();
+    const h = line.match(/^##\s+(.*)$/);
+    if (h) {
+      const b = h[1].match(/^Build\s+(\d+)\s*(?:[·•-]\s*(\S+))?/i);
+      cur = /^planned\b/i.test(h[1]) ? { planned: true } : b ? { build: b[1], version: b[2] || "", items: [], installed: null } : null;
+      if (cur?.build) out.builds.push(cur);
+      continue;
+    }
+    if (!cur) continue;
+    const inst = line.match(/^\*?installed on .*?:\s*(yes|not yet|no)\*?$/i);
+    if (inst && cur.build) { cur.installed = /yes/i.test(inst[1]); continue; }
+    const item = line.match(/^[-*]\s+(.*)$/);
+    if (item) (cur.planned ? out.planned : cur.items).push(item[1]);
+  }
+  out.builds.sort((a, b) => (b.build > a.build ? 1 : b.build < a.build ? -1 : 0));
+  return out;
+}
+async function loadAbout() {
+  const body = $("aboutBody");
+  body.innerHTML = `<p>Loading…</p>`;
+  let r;
+  try { r = await rpc("about", null); } catch (e) { body.innerHTML = `<p class="fail">Couldn't load (${esc(e.message)}).</p>`; return; }
+  const app = window.pocketNative?.app || null;
+  const ios = r.iosChangelog ? parseIosChangelog(r.iosChangelog) : null;
+  const list = (items) => items.length ? `<ul class="pk-ablist">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  const parts = [];
+  // The versions you're on.
+  parts.push(`<div class="pk-abcard"><b>Pocket ${esc(r.pocketVersion)}</b><small>Pages and server. Updates reach you without installing anything.</small></div>`);
+  if (app) parts.push(`<div class="pk-abcard"><b>iPhone app ${esc(app.version || "?")}</b><small>Build ${esc(app.build || "?")} is on this phone.</small></div>`);
+  else if (window.pocketNative?.available) parts.push(`<div class="pk-abcard"><b>iPhone app</b><small>This app build is too old to report its version. The next install will.</small></div>`);
+  else parts.push(`<div class="pk-abcard"><b>iPhone app</b><small>Open this screen in the Pocket iPhone app to see which build you have.</small></div>`);
+  if (ios) {
+    const mine = app?.build || null;
+    const newer = mine ? ios.builds.filter((b) => b.build > mine) : ios.builds.filter((b) => b.installed === false);
+    const current = mine ? ios.builds.find((b) => b.build === mine) : ios.builds.find((b) => b.installed);
+    const older = ios.builds.filter((b) => b !== current && !newer.includes(b));
+    if (newer.length) {
+      parts.push(`<div class="pk-abcard pk-abnew"><b>Built, not on your phone yet</b><small>${newer.length === 1 ? "One newer build is" : `${newer.length} newer builds are`} ready. Install from Xcode (▶ Run), or ask for it to be installed.</small>${newer.map((b) => `<small style="margin-top:8px">Build ${esc(b.build)}${b.version ? ` · ${esc(b.version)}` : ""}</small>${list(b.items)}`).join("")}</div>`);
+    }
+    if (current) parts.push(`<h3>On your phone${current.version ? ` · ${esc(current.version)}` : ""}</h3>${list(current.items)}`);
+    if (ios.planned.length) parts.push(`<h3>Coming next</h3>${list(ios.planned)}`);
+    if (older.length) parts.push(`<details><summary>Earlier app builds (${older.length})</summary>${older.map((b) => `<p style="margin:10px 0 0"><b>Build ${esc(b.build)}${b.version ? ` · ${esc(b.version)}` : ""}</b></p>${list(b.items)}`).join("")}</details>`);
+  }
+  if (r.pocketChangelog) {
+    // Only the newest few Pocket entries up front.
+    const sections = r.pocketChangelog.split(/\n(?=## )/).slice(1);
+    const intro = `<h3>Pocket updates</h3><p style="margin:0">Live already, no install needed.</p>`;
+    parts.push(`${intro}<div class="pk-abmd md">${md(sections.slice(0, 4).join("\n"))}</div>`);
+    if (sections.length > 4) parts.push(`<details><summary>Earlier Pocket updates</summary><div class="pk-abmd md">${md(sections.slice(4).join("\n"))}</div></details>`);
+  }
+  body.innerHTML = parts.join("");
+}
 
 // ---------- notifications screen ----------
 // What the Pocket iPhone app will notify about, quiet hours, the phones that

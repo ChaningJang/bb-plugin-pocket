@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-pocket",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "type": "module",
   "engines": {
     "bb": ">=0.43",
@@ -52,6 +52,7 @@
     "page.html",
     "icon.png",
     "README.md",
+    "CHANGELOG.md",
     "PLUGIN_OVERVIEW.md",
     "NOTIFICATIONS.md",
     "package.json",

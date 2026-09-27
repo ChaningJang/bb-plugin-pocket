@@ -351,6 +351,13 @@ export const rpcContract = defineRpcContract({
   },
   // Forget a registered device (by the last 6 characters of its token, as shown).
   forgetDevice: { input: z.object({ id: z.string().regex(/^[0-9a-f]{6}$/) }), output: ok },
+  // About & what's new: this plugin's version and changelog, and the iPhone
+  // app's changelog if its path is configured (the page compares it with the
+  // installed build the app reports over the bridge).
+  about: {
+    input: z.null(),
+    output: z.object({ pocketVersion: z.string(), pocketChangelog: z.string(), iosChangelog: z.string().nullable() }),
+  },
 });
 
 // The fields Pocket reads; both the list and get DTOs carry them.
@@ -650,6 +657,12 @@ export default async function plugin(bb: BbPluginApi) {
       type: "string",
       label: "Notifications: app bundle id (optional)",
       description: "When set, only devices registered by this app get notifications. Empty: each device's own bundle id is used.",
+      default: "",
+    },
+    iosChangelogFile: {
+      type: "string",
+      label: "iPhone app changelog (optional)",
+      description: "Path on the bb server to the Pocket iPhone app's CHANGELOG.md. Pocket's About screen uses it to show what's built vs. installed.",
       default: "",
     },
   });
@@ -2363,6 +2376,17 @@ export default async function plugin(bb: BbPluginApi) {
       await bb.storage.kv.set("notifyPrefs", prefs);
       bb.log.info(`notify prefs: ${JSON.stringify(prefs)}`);
       return { ok: true };
+    },
+
+    async about() {
+      const pkg = JSON.parse((await asset("package.json")).toString("utf8")) as { version?: string };
+      const pocketChangelog = await asset("CHANGELOG.md").then((b) => b.toString("utf8")).catch(() => "");
+      const path = ((await settings.get()).iosChangelogFile || "").trim();
+      let iosChangelog: string | null = null;
+      if (path) {
+        try { iosChangelog = (await readFile(expandHome(path), "utf8")).slice(0, 200_000); } catch { iosChangelog = null; }
+      }
+      return { pocketVersion: pkg.version ?? "?", pocketChangelog: pocketChangelog.slice(0, 200_000), iosChangelog };
     },
 
     async forgetDevice({ id }) {
