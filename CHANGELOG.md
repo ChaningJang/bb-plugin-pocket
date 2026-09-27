@@ -3,6 +3,10 @@
 Changes to Pocket's pages and server. They reach you as soon as your bb reloads the plugin: no app install needed.
 Newest first.
 
+## 0.4.18
+- In the iPhone app, an Ambient button next to Walk starts Ambient Walk (music plus spoken check-ins); it shows
+  ● Ambient while it's running.
+
 ## 0.4.17
 - About & what's new: see which Pocket and app version you're on, what's built but not installed yet, and what's next.
 
