@@ -84,6 +84,7 @@ test("question notice: one single-select question gives ≤3 safe choices (text 
   assert.deepEqual(n?.choices, [{ label: "Option A", text: "a" }, { label: "Option B", text: "b" }, { label: "Option C", text: "c" }]);
   assert.equal(n?.questionId, "q1");
   assert.equal(buildPayload(n!).pocket.questionId, "q1");
+  assert.equal(buildPayload(n!).pocket.allowFreeText, false, "no typed answers unless the question allows them");
   const multi = interactionNotice("thr_abc", "T", { id: "int_3", createdAt: T, payload: { kind: "user_question", questions: [{ id: "q1", prompt: "One?", options }, { id: "q2", prompt: "Two?", options }] } });
   assert.equal(multi?.body, "One? (+1 more)");
   assert.equal(multi?.choices, undefined);

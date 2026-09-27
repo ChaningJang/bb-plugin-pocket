@@ -54,7 +54,8 @@ The rules:
 ```
 
 - `interactionId` is set for `approval` and `question`.
-- `questionId` is set for a `question` that has `choices`.
+- `questionId` is set for a single-question `question`. `allowFreeText` (questions only) says whether bb accepts a typed
+  answer: if true, Reply… answers with `freeText`; if false, Reply… sends the text as a normal message instead.
 - `choices` has at most 3 entries and is left out when there are none.
 - `recommended` is an index into `choices`. It's only set when a stale-thread recommendation picked one.
 

@@ -19,6 +19,9 @@ export type Notice = {
   interactionId?: string;
   // A question's id: `answer` keys the picked choice by it.
   questionId?: string;
+  // Whether the question takes a typed answer (bb's allowFreeText). The app
+  // only answers Reply… as freeText when true; otherwise it sends a message.
+  allowFreeText?: boolean;
   choices?: Choice[];
   recommended?: number;
 };
@@ -92,14 +95,15 @@ export function interactionNotice(threadId: string, title: string, i: { id: stri
     return { threadId, kind: "approval", title, body: plainText(body), forAt: i.createdAt, interactionId: i.id };
   }
   if (p.kind === "user_question" && Array.isArray(p.questions) && p.questions.length) {
-    const qs = p.questions as Array<{ id: string; prompt?: string; multiSelect?: boolean; options?: Array<{ label: string; value: string }> }>;
+    const qs = p.questions as Array<{ id: string; prompt?: string; multiSelect?: boolean; allowFreeText?: boolean; options?: Array<{ label: string; value: string }> }>;
     const q = qs[0];
     const extra = qs.length > 1 ? ` (+${qs.length - 1} more)` : "";
-    const n: Notice = { threadId, kind: "question", title, body: plainText(`${q.prompt ?? "A question for you"}${extra}`), forAt: i.createdAt, interactionId: i.id };
+    const n: Notice = { threadId, kind: "question", title, body: plainText(`${q.prompt ?? "A question for you"}${extra}`), forAt: i.createdAt, interactionId: i.id,
+      ...(qs.length === 1 ? { questionId: String(q.id), allowFreeText: q.allowFreeText === true } : { allowFreeText: false }) };
     if (qs.length === 1 && !q.multiSelect && q.options?.length) {
       // text = the option's value: what `answer` takes in `selected`.
       const choices = q.options.map((o) => ({ label: String(o.label), text: String(o.value) })).filter((c) => c.label && c.text && safePill(c));
-      if (choices.length) Object.assign(n, { questionId: String(q.id), choices: choices.slice(0, CHOICES_MAX) });
+      if (choices.length) Object.assign(n, { choices: choices.slice(0, CHOICES_MAX) });
     }
     return n;
   }
@@ -173,6 +177,7 @@ export function buildPayload(n: Notice) {
   const pocket: Record<string, unknown> = { threadId: n.threadId, kind: n.kind, forAt: n.forAt };
   if (n.interactionId) pocket.interactionId = n.interactionId;
   if (n.questionId) pocket.questionId = n.questionId;
+  if (n.kind === "question") pocket.allowFreeText = n.allowFreeText === true;
   const choices = (n.choices ?? []).slice(0, CHOICES_MAX);
   if (choices.length) {
     pocket.choices = choices.map((c) => ({ label: c.label, text: c.text }));
