@@ -1517,9 +1517,24 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && !r
 // Back pops history when we got here from the list; opened directly on a
 // view (a shared link, a home-screen resume), it goes to the list instead.
 let sawHome = false;
-document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => {
+function goBack() {
   if (sawHome) history.back(); else location.replace("#");
-}));
+}
+document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", goBack));
+// The iOS app's left-edge swipe calls this (bridge v1, see pocket-ios/BRIDGE.md).
+// It peels off what's on top first, like the back button would feel: file
+// viewer, sheet, artifacts tray; otherwise it goes back. Returns whether it did
+// anything, so the app only buzzes on a real back. Never while Walk is locked.
+window.pocketBack = () => {
+  if (!$("pkWalkLock").hidden) return false;
+  if (!$("pkFileView").hidden) { closeFileView(); return true; }
+  if (!$("sheetWrap").hidden) { closeSheet(); return true; }
+  if (!$("threadTray").hidden) { closeThreadTray(); return true; }
+  const h = location.hash;
+  if (!h || h === "#" || h === "#/") return false; // already on the list
+  goBack();
+  return true;
+};
 
 // ---------- home ----------
 async function loadHome() {
