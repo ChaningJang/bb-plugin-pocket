@@ -1605,10 +1605,11 @@ function renderHome() {
   if (more) more.onclick = () => { state.showAll = true; renderHome(); };
 
   // Walk needs the Talk to BB plugin; without it there's no button.
-  $("talkBtn").hidden = !state.home.walk && walk.phase === "idle";
+  const wphase = walkPhase();
+  $("talkBtn").hidden = !state.home.walk && wphase === "idle";
   // A Walk call keeps running while you look around; say so.
-  $("talkBtn").lastChild.textContent = walk.phase === "idle" ? "Walk" : "● Live";
-  $("talkBtn").style.color = walk.phase === "idle" ? "" : "var(--green)";
+  $("talkBtn").lastChild.textContent = wphase === "idle" ? "Walk" : "● Live";
+  $("talkBtn").style.color = wphase === "idle" ? "" : "var(--green)";
   renderMachineLine();
   const n = state.home.newArtifacts;
   $("artBadge").hidden = !n;
@@ -1816,7 +1817,23 @@ async function togglePin(id) {
 
 $("newBtn").onclick = () => { location.hash = "#/new"; };
 $("artBtn").onclick = () => { location.hash = "#/artifacts"; };
-$("talkBtn").onclick = () => { location.hash = "#/walk"; };
+// Inside the Pocket iOS app, Walk runs natively (it keeps going on a locked
+// phone); the page only hands over the manager thread. See pocket-ios/BRIDGE.md.
+const nativeWalk = { phase: "idle", liveAt: 0 };
+const walkPhase = () => nativeWalk.phase !== "idle" ? nativeWalk.phase : walk.phase;
+function startNativeWalk() {
+  const mgr = threadById(state.home?.managerId);
+  window.pocketNative.walk(mgr?.id || null, mgr?.projectId || null);
+}
+window.addEventListener("pocketnative", (e) => {
+  const m = e.detail || {};
+  if (m.type !== "walk-state") return;
+  nativeWalk.phase = m.phase || "idle";
+  nativeWalk.liveAt = m.liveAt || 0;
+  if (m.phase === "idle" && m.message) walkStatus(m.message);
+  if (state.home) renderHome();
+});
+$("talkBtn").onclick = () => { if (window.pocketNative?.available) startNativeWalk(); else location.hash = "#/walk"; };
 
 // ---------- hold to talk ----------
 // Press: recording starts. Release: transcribe and review. Slide up onto the
@@ -1827,7 +1844,9 @@ const hold = { active: false, locked: false, released: false, starting: false, c
 // Safari has no vibrate(). Toggling a switch-style checkbox is the one haptic
 // it exposes (iOS 18+), and only while a finger is going down or lifting, so
 // call this synchronously from pointerdown/pointerup, never after an await.
-function buzz() {
+function buzz(kind = "light") {
+  // In the iOS app a real haptic works any time, even after an await.
+  if (window.pocketNative?.available) { window.pocketNative.haptic(kind); return; }
   try { if (navigator.vibrate) { navigator.vibrate(12); return; } } catch {}
   try {
     const label = document.createElement("label");
@@ -2885,6 +2904,7 @@ function caption(speaker, text) {
 }
 
 async function startWalk() {
+  if (window.pocketNative?.available) return startNativeWalk(); // native Walk; never open a second mic or socket
   recorder.closeMic(); // Walk opens its own mic; don't hold two
   audioSession("play-and-record");
   walk.phase = "connecting"; walk.captions = []; walk.receipts = []; walk.micOff = false; walk.quiet = false;
