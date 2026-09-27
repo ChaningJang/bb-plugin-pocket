@@ -3004,10 +3004,10 @@ function renderMachineLine() {
 // Model picker. `fixedProvider` = an existing thread (bb only lets a thread
 // change model and reasoning, not provider). Resolves with the pick or null.
 let catalogCache = null;
-async function pickModel({ providerId, model, reasoning, fixedProvider }) {
+async function pickModel({ providerId, model, reasoning, fixedProvider, access }) {
   if (!catalogCache) { try { catalogCache = (await rpc("catalog")).providers; } catch (e) { toast(e.message); return null; } }
   return new Promise((resolve) => {
-    let pv = providerId || catalogCache[0]?.id, md = model, rs = reasoning;
+    let pv = providerId || catalogCache[0]?.id, md = model, rs = reasoning, ac = access, touched = false;
     const provider = () => catalogCache.find((p) => p.id === pv) || catalogCache[0];
     const draw = () => {
       const p = provider();
@@ -3019,14 +3019,17 @@ async function pickModel({ providerId, model, reasoning, fixedProvider }) {
         ${fixedProvider ? `<h3>${esc(p.name)}</h3>` : `<h3>Provider</h3><div class="chips">${catalogCache.map((x) => `<button class="chip${x.id === p.id ? " on" : ""}" data-pv="${esc(x.id)}">${esc(x.name)}</button>`).join("")}</div><h3>Model</h3>`}
         <ul class="plist">${p.models.map((x) => `<li><button data-md="${esc(x.id)}" class="${x.id === md ? "on" : ""}">${esc(x.name)}${x.isDefault ? ` <small>default</small>` : ""}</button></li>`).join("")}</ul>
         ${m.efforts.length ? `<h3>Reasoning</h3><div class="chips">${m.efforts.map((e) => `<button class="chip${e === rs ? " on" : ""}" data-rs="${esc(e)}">${esc(e)}</button>`).join("")}</div>` : ""}
+        ${ac !== undefined ? `<h3>Access</h3><div class="chips">${[["auto", "Auto"], ["full", "Full access"]].map(([v, l]) => `<button class="chip${v === ac ? " on" : ""}" data-ac="${v}">${l}</button>`).join("")}</div>` : ""}
         <div class="btns" style="padding:0 8px"><button class="btn" id="pickCancel">Cancel</button><button class="btn primary" id="pickDone">Use this</button></div></div>`);
-      sheet.querySelectorAll("[data-pv]").forEach((b) => b.onclick = () => { pv = b.dataset.pv; md = null; draw(); });
-      sheet.querySelectorAll("[data-md]").forEach((b) => b.onclick = () => { md = b.dataset.md; draw(); });
-      sheet.querySelectorAll("[data-rs]").forEach((b) => b.onclick = () => { rs = b.dataset.rs; draw(); });
+      sheet.querySelectorAll("[data-pv]").forEach((b) => b.onclick = () => { pv = b.dataset.pv; md = null; touched = true; draw(); });
+      sheet.querySelectorAll("[data-md]").forEach((b) => b.onclick = () => { md = b.dataset.md; touched = true; draw(); });
+      sheet.querySelectorAll("[data-rs]").forEach((b) => b.onclick = () => { rs = b.dataset.rs; touched = true; draw(); });
+      sheet.querySelectorAll("[data-ac]").forEach((b) => b.onclick = () => { ac = b.dataset.ac; draw(); });
       sheet.querySelector("#pickCancel").onclick = () => { closeSheet(); resolve(null); };
       sheet.querySelector("#pickDone").onclick = () => {
         closeSheet();
-        resolve({ providerId: p.id, providerName: p.name, model: md, modelName: m.name, reasoning: m.efforts.length ? rs : null });
+        // touched: you tapped a provider, model or reasoning (not just the defaults the sheet filled in).
+        resolve({ providerId: p.id, providerName: p.name, model: md, modelName: m.name, reasoning: m.efforts.length ? rs : null, access: ac, touched });
       };
     };
     draw();
@@ -3040,18 +3043,25 @@ function syncModelChip() {
   const t = state.thread;
   const show = !!t?.exec && !recorder.active && (document.activeElement === reply || !!reply.value.trim());
   $("cmodel").hidden = !show;
-  if (show) $("modelChipText").textContent = [t.exec.modelName || t.exec.model || "Default model", t.exec.reasoning].filter(Boolean).join(" · ");
+  if (show) $("modelChipText").textContent = [t.exec.modelName || t.exec.model || "Default model", t.exec.reasoning, t.exec.access === "full" ? "Full access" : ""].filter(Boolean).join(" · ");
 }
 async function changeThreadModel() {
   const t = state.thread;
   if (!t?.exec) return;
-  const pick = await pickModel({ providerId: t.exec.providerId, model: t.exec.model, reasoning: t.exec.reasoning, fixedProvider: true });
+  const was = t.exec.access === "full" ? "full" : "auto";
+  const pick = await pickModel({ providerId: t.exec.providerId, model: t.exec.model, reasoning: t.exec.reasoning, fixedProvider: true, access: was });
   if (!pick) return;
+  // Only change the model when you picked one: the sheet fills in a reasoning
+  // level the catalog prefers, which alone must not rewrite the thread's model.
+  const modelChanged = pick.touched && (pick.model !== t.exec.model || (pick.reasoning || null) !== (t.exec.reasoning || null));
   try {
-    await rpc("setModel", { threadId: t.id, model: pick.model, ...(pick.reasoning ? { reasoningLevel: pick.reasoning } : {}) });
-    t.exec = { ...t.exec, model: pick.model, modelName: pick.modelName, reasoning: pick.reasoning };
+    if (modelChanged) await rpc("setModel", { threadId: t.id, model: pick.model, ...(pick.reasoning ? { reasoningLevel: pick.reasoning } : {}) });
+    // Access has no thread setting in bb: it rides on each message, from the next one on.
+    if (pick.access !== was) await rpc("setAccess", { threadId: t.id, mode: pick.access });
+    t.exec = modelChanged ? { ...t.exec, model: pick.model, modelName: pick.modelName, reasoning: pick.reasoning, access: pick.access } : { ...t.exec, access: pick.access };
     syncModelChip();
-    toast(`Next turns use ${pick.modelName}${pick.reasoning ? ` · ${pick.reasoning}` : ""}`);
+    const said = [modelChanged ? `${pick.modelName}${pick.reasoning ? ` · ${pick.reasoning}` : ""}` : "", pick.access !== was ? (pick.access === "full" ? "Full access" : "Auto access") : ""].filter(Boolean).join(", ");
+    if (said) toast(`From your next message: ${said}`);
   } catch (e) { toast(e.message); }
 }
 // pointerdown + preventDefault keeps the keyboard from dropping (and the chip
@@ -3069,8 +3079,9 @@ function execSheet() {
   const m = t.machine;
   const sheet = openSheet(`<div class="menu"><div class="execinfo">
       Runs on <b>${m ? esc(shortMachine(m.name)) : "an unknown machine"}</b>${m ? (m.online ? " · online" : ` · <span style="color:var(--red)">offline, so it can't run until that machine is back</span>`) : ""}<br>
-      Model <b>${esc(execLabel(t.exec))}</b></div>
-    <button data-a="model">Change model</button><button data-close>Close</button></div>`);
+      Model <b>${esc(execLabel(t.exec))}</b><br>
+      Access <b>${t.exec?.access === "full" ? "Full access" : "Auto"}</b></div>
+    <button data-a="model">Change model or access</button><button data-close>Close</button></div>`);
   sheet.querySelector('[data-a="model"]').onclick = changeThreadModel;
   sheet.querySelectorAll("[data-close]").forEach((b) => b.onclick = closeSheet);
 }

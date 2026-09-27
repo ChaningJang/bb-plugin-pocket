@@ -32,8 +32,9 @@ or login: if you can open bb, you can open Pocket.
     open that thread.
   - **File links** in messages open: images full-screen (pinch to zoom), `.md` files in Pocket's reader, pages and
     PDFs in a new tab through bb's preview. Relative paths resolve in the thread's folder; missing files say so.
-  - **Model chip:** while you type, a chip above the reply box shows the thread's model. Tap it to switch model or
-    reasoning level for the next turn.
+  - **Model chip:** while you type, a chip above the reply box shows the thread's model. Tap it to switch model,
+    reasoning level, or access (Auto / Full access) for the next turn. bb takes access per message, so Pocket
+    remembers your choice for that thread and sends it with every message you send from Pocket.
   - **New thread:** pick the project, machine and model.
   - **Swipe in from the right edge** (or tap the tray icon in the header) for the files and links the thread
     produced. The thread's ⋯ menu also has Rename.

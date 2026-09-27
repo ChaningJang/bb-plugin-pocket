@@ -120,7 +120,7 @@ export const rpcContract = defineRpcContract({
       unread: z.boolean(),
       pinned: z.boolean(),
       machine: z.object({ id: z.string(), name: z.string(), online: z.boolean() }).nullable(),
-      exec: z.object({ providerId: z.string(), providerName: z.string(), model: z.string().nullable(), modelName: z.string().nullable(), reasoning: z.string().nullable() }),
+      exec: z.object({ providerId: z.string(), providerName: z.string(), model: z.string().nullable(), modelName: z.string().nullable(), reasoning: z.string().nullable(), access: z.string().nullable() }),
       rec: z.object({ forAt: z.number(), pills: z.array(z.object({ label: z.string(), text: z.string() })), recommended: z.number(), reason: z.string(), stake: z.string() }).nullable(),
       messages: z.array(message),
       interactions: z.array(interaction),
@@ -240,6 +240,9 @@ export const rpcContract = defineRpcContract({
     }),
   },
   setModel: { input: z.object({ threadId, model: z.string().max(120), reasoningLevel: z.string().max(20).optional() }), output: ok },
+  // Auto / Full access for an existing thread. bb takes access per message, so
+  // Pocket remembers the choice and sends it with every message to that thread.
+  setAccess: { input: z.object({ threadId, mode: z.enum(["auto", "full"]) }), output: ok },
   rename: { input: z.object({ threadId, title: z.string().trim().min(1).max(200) }), output: ok },
   // ✨ in Rename: a short descriptive title from how the thread started and where it is.
   suggestTitle: { input: z.object({ threadId }), output: z.object({ title: z.string() }) },
@@ -1341,6 +1344,12 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   type FileLink = { hostId: string | null; path: string; kind: string; name: string; local: boolean };
+  // The access you picked for a thread in Pocket, sent with each message to it.
+  async function accessFor(threadId: string): Promise<"auto" | "full" | null> {
+    const v = await bb.storage.kv.get<string>(`access:${threadId}`);
+    return v === "auto" || v === "full" ? v : null;
+  }
+
   // ---- attachments you send -------------------------------------------------
   async function attach(projectId: string, files: Array<z.infer<typeof upFile>>) {
     const decoded = files.map((f) => ({ ...f, bytes: Buffer.from(f.data, "base64") }));
@@ -1600,15 +1609,16 @@ export default async function plugin(bb: BbPluginApi) {
         } catch { /* environment gone */ }
       }
       const providerId = (t as unknown as { providerId?: string }).providerId ?? "";
-      let eff: { model?: string | null; reasoningLevel?: string | null } = {};
+      let eff: { model?: string | null; reasoningLevel?: string | null; permissionMode?: string | null } = {};
       try { eff = (await bb.sdk.threads.defaultExecutionOptions({ threadId })) as unknown as typeof eff; } catch {}
+      const access = (await accessFor(threadId)) ?? eff.permissionMode ?? null;
       const provName = (await catalog().catch(() => [])).find((p) => p.id === providerId)?.name ?? providerId;
       return {
         id: t.id,
         projectId: t.projectId,
         projectName: names.get(t.projectId) ?? "",
         machine,
-        exec: { providerId, providerName: provName, model: eff.model ?? null, modelName: await modelName(providerId, eff.model ?? null), reasoning: eff.reasoningLevel ?? null },
+        exec: { providerId, providerName: provName, model: eff.model ?? null, modelName: await modelName(providerId, eff.model ?? null), reasoning: eff.reasoningLevel ?? null, access },
         title: titleOf(dto),
         status: statusOf(dto),
         unread: isUnread(dto),
@@ -1621,10 +1631,12 @@ export default async function plugin(bb: BbPluginApi) {
 
     async send({ threadId, text, files }) {
       const attached = files?.length ? await attach((await bb.sdk.threads.get({ threadId })).projectId, files) : [];
+      const permissionMode = await accessFor(threadId);
       const result = await bb.sdk.threads.send({
         threadId,
         mode: "auto",
         input: [...(text ? [{ type: "text" as const, text, mentions: [] }] : []), ...attached],
+        ...(permissionMode ? { permissionMode } : {}),
       });
       return { delivery: result.delivery };
     },
@@ -1791,7 +1803,8 @@ export default async function plugin(bb: BbPluginApi) {
       const mgr = await chooseManager(list, managers);
       const target = list.find((t) => t.id === mgr.id);
       if (!target) return { ok: false, reason: "no-manager", threadId: null, title: null, delivery: null };
-      const r = await bb.sdk.threads.send({ threadId: target.id, mode: "auto", input: [{ type: "text", text, mentions: [] }] });
+      const permissionMode = await accessFor(target.id);
+      const r = await bb.sdk.threads.send({ threadId: target.id, mode: "auto", input: [{ type: "text", text, mentions: [] }], ...(permissionMode ? { permissionMode } : {}) });
       bb.log.info(`tell -> ${target.id} (${text.length} chars, ${r.delivery})`);
       return { ok: true, reason: null, threadId: target.id, title: titleOf(target), delivery: r.delivery };
     },
@@ -1864,6 +1877,12 @@ export default async function plugin(bb: BbPluginApi) {
       const machines = ((p?.sources ?? []) as Array<{ hostId: string; isDefault?: boolean }>)
         .map((s) => { const h = hs.find((x) => x.id === s.hostId); return { hostId: s.hostId, name: h?.name ?? s.hostId, online: Boolean(h?.online), isDefault: Boolean(s.isDefault) }; });
       return { defaults: { providerId: d?.providerId ?? null, model: d?.model ?? null, reasoningLevel: d?.reasoningLevel ?? null }, machines };
+    },
+
+    async setAccess({ threadId, mode }) {
+      await bb.storage.kv.set(`access:${threadId}`, mode);
+      bb.log.info(`access ${threadId} -> ${mode} (from the next message)`);
+      return { ok: true };
     },
 
     async setModel({ threadId, model, reasoningLevel }) {
