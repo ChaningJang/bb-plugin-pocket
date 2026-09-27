@@ -1425,11 +1425,13 @@ const micError = (e) => e?.name === "NotAllowedError" ? "Microphone blocked. All
 let sheetOpenedAt = 0;
 function openSheet(html) {
   sheetOpenedAt = Date.now();
+  resetSheetDrag();
   $("sheet").innerHTML = `<div class="grab"></div>${html}`;
   $("sheetWrap").hidden = false;
   return $("sheet");
 }
 function closeSheet() {
+  resetSheetDrag();
   $("sheetWrap").hidden = true;
   $("sheet").innerHTML = "";
   if (voice.phase === "recording") recorder.cancel();
@@ -1438,6 +1440,57 @@ function closeSheet() {
 // Tapping outside never throws away a recording in progress; Cancel does.
 // Lifting the finger after a long press lands a tap on the backdrop that just
 // appeared under it; that tap must not close the menu it opened.
+// Swipe a sheet down to dismiss it, as the grab bar promises. From the top of
+// the sheet's scroll only (so its own scrolling still works), or from the grab
+// bar at any scroll. Not from text fields, and never mid-recording (like the scrim).
+function resetSheetDrag() {
+  const sh = $("sheet"), sc = $("scrim");
+  sh.style.transition = ""; sh.style.transform = ""; sc.style.transition = ""; sc.style.opacity = "";
+}
+(() => {
+  const sh = $("sheet");
+  let y0 = 0, x0 = 0, t0 = 0, dy = 0, fromGrab = false, topAtStart = false, dragging = false, live = false;
+  sh.addEventListener("touchstart", (e) => {
+    const p = e.touches[0];
+    live = !!p && e.touches.length === 1 && !e.target.closest("input, textarea, select, [contenteditable]");
+    if (!live) return;
+    y0 = p.clientY; x0 = p.clientX; t0 = performance.now(); dy = 0; dragging = false;
+    fromGrab = !!e.target.closest(".grab") || p.clientY - sh.getBoundingClientRect().top < 28;
+    topAtStart = sh.scrollTop <= 0;
+  }, { passive: true });
+  sh.addEventListener("touchmove", (e) => {
+    if (!live) return;
+    const p = e.touches[0];
+    dy = p.clientY - y0;
+    if (!dragging) {
+      if (dy > 8 && dy > Math.abs(p.clientX - x0) && (fromGrab || (topAtStart && sh.scrollTop <= 0))
+          && voice.phase !== "recording" && voice.phase !== "transcribing") dragging = true;
+      else if (Math.abs(dy) > 8 || Math.abs(p.clientX - x0) > 8) { live = false; return; }
+      else return;
+    }
+    e.preventDefault(); // the sheet moves instead of scrolling
+    const d = Math.max(0, dy);
+    sh.style.transition = "none"; sh.style.transform = `translateY(${d}px)`;
+    $("scrim").style.opacity = String(Math.max(0.2, 1 - d / Math.max(200, sh.offsetHeight)));
+  }, { passive: false });
+  const finish = () => {
+    if (!live || !dragging) { live = false; return; }
+    live = false; dragging = false;
+    const v = dy / Math.max(1, performance.now() - t0); // px per ms
+    if (dy > Math.min(140, sh.offsetHeight * 0.3) || (v > 0.6 && dy > 40)) {
+      sh.style.transition = "transform .2s ease-in"; sh.style.transform = "translateY(100%)";
+      $("scrim").style.transition = "opacity .2s"; $("scrim").style.opacity = "0";
+      setTimeout(closeSheet, 200);
+    } else {
+      sh.style.transition = "transform .22s cubic-bezier(.2,.9,.3,1.2)"; sh.style.transform = "translateY(0)";
+      $("scrim").style.transition = "opacity .2s"; $("scrim").style.opacity = "";
+      setTimeout(resetSheetDrag, 240);
+    }
+  };
+  sh.addEventListener("touchend", finish);
+  sh.addEventListener("touchcancel", finish);
+})();
+
 $("scrim").onclick = () => {
   if (Date.now() - sheetOpenedAt < 700) return;
   if (voice.phase !== "recording" && voice.phase !== "transcribing") closeSheet();
@@ -1658,7 +1711,7 @@ function attachSwipe(li) {
     row.classList.remove("settle");
     // Long press (finger still for ~0.5 s): the row's menu.
     row.classList.add("rowhold");
-    hold = setTimeout(() => { row.classList.remove("rowhold"); tracking = false; swallowClick = true; rowMenu(id, !!li.dataset.needs); }, 500);
+    hold = setTimeout(() => { row.classList.remove("rowhold"); tracking = false; swallowClick = true; buzz("medium"); rowMenu(id, !!li.dataset.needs); }, 500);
   });
   row.addEventListener("pointerup", cancelHold);
   row.addEventListener("pointercancel", cancelHold);

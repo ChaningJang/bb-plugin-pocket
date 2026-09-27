@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-pocket",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "type": "module",
   "engines": {
     "bb": ">=0.43",
@@ -48,10 +48,12 @@
   "description": "A radically simpler phone view of bb: voice to your manager thread, swipe triage, quick replies, artifacts.",
   "files": [
     "server.ts",
+    "notify.ts",
     "page.html",
     "icon.png",
     "README.md",
     "PLUGIN_OVERVIEW.md",
+    "NOTIFICATIONS.md",
     "package.json",
     "tsconfig.json",
     "LICENSE"
@@ -60,5 +62,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/ChaningJang/bb-plugin-pocket.git"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
   }
 }

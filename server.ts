@@ -9,12 +9,18 @@
 // and no second login.
 import { execFile } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { connect as h2connect, constants as h2, type ClientHttp2Session } from "node:http2";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize } from "node:path";
 import { parseEnv } from "node:util";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import {
+  APNS_HOST, JWT_TTL_MS, RateLimit, UNSAFE_PILL, apnsHeaders, apnsJwt, buildPayload, describeApproval, emptyState,
+  interactionNotice, isDeadToken, plainText, redacted, replyChoices, safePill, verdict,
+  type Choice, type Notice, type NotifState,
+} from "./notify.ts";
 
 const threadRow = z.object({
   id: z.string(),
@@ -303,6 +309,22 @@ export const rpcContract = defineRpcContract({
     input: z.object({ ids: z.array(z.string().max(40)).max(500) }),
     output: ok,
   },
+  // The Pocket iOS app registers its APNs device token here (on every launch;
+  // re-registering the same token just refreshes lastSeen).
+  registerDevice: {
+    input: z.object({ token: z.string().regex(/^[0-9a-fA-F]{32,200}$/), env: z.enum(["sandbox", "production"]), bundleId: z.string().min(1).max(200) }),
+    output: ok,
+  },
+  // Sends one test notification to every registered device (or logs it, in a
+  // dry run) and says what APNs answered. Tapping it opens `threadId`, else the manager.
+  testNotification: {
+    input: z.object({ threadId: threadId.optional() }).nullable(),
+    output: z.object({
+      dryRun: z.boolean(),
+      devices: z.number(),
+      results: z.array(z.object({ device: z.string(), env: z.string(), status: z.number(), reason: z.string().nullable() })),
+    }),
+  },
 });
 
 // The fields Pocket reads; both the list and get DTOs carry them.
@@ -581,6 +603,27 @@ export default async function plugin(bb: BbPluginApi) {
       type: "string",
       label: "Drafts: env file with SLACK_USER_TOKEN (optional)",
       description: "Lets Pocket drop a Slack draft once you've sent a matching message.",
+      default: "",
+    },
+    notifications: {
+      type: "boolean",
+      label: "Notifications: push to the Pocket iOS app",
+      description: "Approvals, questions, and agent replies that need you, sent to the Pocket app through Apple Push. Needs the APNs key below.",
+      default: false,
+    },
+    notificationsDryRun: {
+      type: "boolean",
+      label: "Notifications: dry run",
+      description: "Log what would be sent instead of sending. Also in effect while the APNs key, key id or team id is missing.",
+      default: true,
+    },
+    apnsKeyFile: { type: "string", label: "Notifications: APNs key file (.p8) on the bb server", default: "" },
+    apnsKeyId: { type: "string", label: "Notifications: APNs key id", description: "The 10-character Key ID shown next to the key in Apple's developer portal.", default: "" },
+    apnsTeamId: { type: "string", label: "Notifications: Apple team id", default: "" },
+    apnsBundleId: {
+      type: "string",
+      label: "Notifications: app bundle id (optional)",
+      description: "When set, only devices registered by this app get notifications. Empty: each device's own bundle id is used.",
       default: "",
     },
   });
@@ -1019,8 +1062,6 @@ export default async function plugin(bb: BbPluginApi) {
     "Prefer decisive replies over questions. No pleasantries.",
   ].join(" ");
 
-  const UNSAFE_PILL = /\b(send|sends|sent|post|posts|publish|forward|e-?mail (it|him|her|them)|reply all|delete|remove|archive|trash)\b/i;
-
   // Fallback without the model: a closing yes/no question gets Yes / Not now.
   function heuristicPills(msg: string) {
     const last = msg.trim().split("\n").filter((l) => l.trim()).pop() ?? "";
@@ -1100,8 +1141,6 @@ export default async function plugin(bb: BbPluginApi) {
       .filter((p) => p.label?.trim() && p.text?.trim())
       .map((p) => ({ label: p.label!.trim().slice(0, 40), text: p.text!.trim().slice(0, 400) }));
   }
-  const safePill = (p: { label: string; text: string }) =>
-    !UNSAFE_PILL.test(`${p.label} ${p.text}`) && !/^(something else|other|none of these)\.?$/i.test(p.text.trim());
 
   type Rec = { forAt: number; attn: number; pills: Array<{ label: string; text: string }>; recommended: number; reason: string; stake: string };
 
@@ -1258,6 +1297,202 @@ export default async function plugin(bb: BbPluginApi) {
         try { await recommendSweep(); } catch (e) { bb.log.warn(`rec sweep: ${e instanceof Error ? e.message : e}`); }
         await sleep(5 * 60_000);
       }
+    },
+  });
+
+  // Quick-reply pills for the agent's message at `forAt`, cached per thread so
+  // the page and the notifier share one model call.
+  async function cachedPills(threadId: string, forAt: number, agent: string, user: string | null) {
+    const cached = await bb.storage.kv.get<{ forAt: number; pills: Choice[] }>(`sug4:${threadId}`);
+    if (cached && cached.forAt === forAt) return cached;
+    const value = { forAt, pills: await suggestFor(agent, user) };
+    await bb.storage.kv.set(`sug4:${threadId}`, value);
+    return value;
+  }
+
+  // ---- notifications ------------------------------------------------------
+  // The Pocket iOS app registers a device token; this service watches for
+  // what would put a thread in Needs you (a pending approval or question, an
+  // agent reply you haven't read, a stale-thread recommendation) and pushes
+  // one notification per agent message through APNs. Answers come back
+  // through the ordinary RPCs (send, approve, answer, setRead, dismiss).
+  type Device = { token: string; env: "sandbox" | "production"; bundleId: string; addedAt: number; lastSeen: number };
+  const devices = async () => (await bb.storage.kv.get<Device[]>("devices")) ?? [];
+  const NOTIFY_POLL_MS = 20_000;
+  const BACKLOG_MS = 30 * 60_000; // no backlog blast: older messages are passed over when notifications start
+  const notifyLimit = new RateLimit(6, 60_000);
+
+  let jwtCache: { ident: string; at: number; token: string } | null = null;
+  async function providerToken(keyFile: string, keyId: string, teamId: string): Promise<string> {
+    const ident = `${keyFile}|${keyId}|${teamId}`;
+    if (jwtCache && jwtCache.ident === ident && Date.now() - jwtCache.at < JWT_TTL_MS) return jwtCache.token;
+    const pem = await readFile(expandHome(keyFile), "utf8");
+    const token = apnsJwt(pem, keyId, teamId, Math.floor(Date.now() / 1000));
+    jwtCache = { ident, at: Date.now(), token };
+    return token;
+  }
+
+  const h2sessions = new Map<string, ClientHttp2Session>();
+  function h2session(origin: string): ClientHttp2Session {
+    const open = h2sessions.get(origin);
+    if (open && !open.closed && !open.destroyed) return open;
+    const s = h2connect(origin);
+    const drop = () => { if (h2sessions.get(origin) === s) h2sessions.delete(origin); };
+    s.on("error", (e) => { bb.log.warn(`apns connection: ${e.message}`); drop(); });
+    s.on("close", drop);
+    s.on("goaway", drop);
+    s.unref();
+    h2sessions.set(origin, s);
+    return s;
+  }
+  const closeSessions = () => { for (const s of h2sessions.values()) s.close(); h2sessions.clear(); };
+
+  function apnsPost(origin: string, deviceToken: string, headers: Record<string, string>, body: string): Promise<{ status: number; reason: string | null }> {
+    return new Promise((resolve, reject) => {
+      const req = h2session(origin).request({ ":method": "POST", ":path": `/3/device/${deviceToken}`, "content-type": "application/json", ...headers });
+      let status = 0;
+      let data = "";
+      req.setEncoding("utf8");
+      req.setTimeout(15_000, () => req.close(h2.NGHTTP2_CANCEL));
+      req.on("response", (h) => { status = Number(h[":status"]); });
+      req.on("data", (c: string) => { data += c; });
+      req.on("end", () => {
+        let reason: string | null = null;
+        try { reason = (JSON.parse(data) as { reason?: string }).reason ?? null; } catch { /* 200 has no body */ }
+        resolve({ status, reason: status ? reason : reason ?? "timeout" });
+      });
+      req.on("error", reject);
+      req.end(body);
+    });
+  }
+
+  /** Send one notice to every registered device, or log it in a dry run. */
+  async function deliver(n: Notice): Promise<{ dryRun: boolean; results: Array<{ device: string; env: string; status: number; reason: string | null }> }> {
+    const cfg = await settings.get();
+    const keyReady = Boolean(cfg.apnsKeyFile && cfg.apnsKeyId && cfg.apnsTeamId);
+    const dryRun = cfg.notificationsDryRun !== false || !keyReady;
+    const all = await devices();
+    const want = (cfg.apnsBundleId || "").trim();
+    const targets = want ? all.filter((d) => d.bundleId === want) : all;
+    const payload = buildPayload(n);
+    if (dryRun) {
+      bb.log.info(`notify (dry run${keyReady ? "" : ", no APNs key"}) ${n.threadId} ${n.kind} → ${targets.length} device(s): ${JSON.stringify(redacted(payload))}`);
+      return { dryRun: true, results: targets.map((d) => ({ device: `…${d.token.slice(-6)}`, env: d.env, status: 0, reason: "dry run" })) };
+    }
+    if (!targets.length) bb.log.info(`notify ${n.threadId} ${n.kind}: no registered devices`);
+    const body = JSON.stringify(payload);
+    const results = [];
+    const dead = new Set<string>();
+    for (const d of targets) {
+      let r: { status: number; reason: string | null };
+      try {
+        const send = async () => apnsPost(APNS_HOST[d.env], d.token, apnsHeaders(d.bundleId, n.threadId, await providerToken(cfg.apnsKeyFile, cfg.apnsKeyId, cfg.apnsTeamId)), body);
+        r = await send();
+        if (r.status === 403 && r.reason === "ExpiredProviderToken") { jwtCache = null; r = await send(); }
+      } catch (e) {
+        r = { status: 0, reason: e instanceof Error ? e.message.slice(0, 120) : "error" };
+      }
+      bb.log.info(`notify ${n.threadId} ${n.kind} → …${d.token.slice(-6)} (${d.env}): ${r.status}${r.reason ? ` ${r.reason}` : ""}`);
+      if (isDeadToken(r.status, r.reason ?? undefined)) dead.add(d.token);
+      results.push({ device: `…${d.token.slice(-6)}`, env: d.env, status: r.status, reason: r.reason });
+    }
+    if (dead.size) {
+      // Re-read so a registration that landed meanwhile isn't lost.
+      await bb.storage.kv.set("devices", (await devices()).filter((d) => !dead.has(d.token)));
+      bb.log.info(`dropped ${dead.size} unregistered device(s)`);
+    }
+    return { dryRun: false, results };
+  }
+
+  // Home's rows: top-level threads, plus children that are pinned or blocked
+  // on a question. Anything else is hidden in Pocket and never notifies.
+  const onHome = (t: Dto) => !t.parentThreadId || t.hasPendingInteraction || t.pinnedAt;
+
+  let enabledSince: number | null = null;
+  async function notifyPoll() {
+    if (!(await settings.get()).notifications) { enabledSince = null; return; }
+    enabledSince ??= Date.now();
+    const cutoff = enabledSince - BACKLOG_MS;
+    const list = ((await bb.sdk.threads.list({ archived: false, limit: 300 })) as Dto[]).filter(onHome);
+    const found: Array<{ n: Notice; threadId: string }> = [];
+    const nextState = new Map<string, NotifState>();
+    for (const t of list) {
+      if (await isDismissed(t)) continue;
+      const key = `notif:${t.id}`;
+      const st = (await bb.storage.kv.get<NotifState>(key)) ?? emptyState();
+      const next: NotifState = { ...st, ints: [...st.ints] };
+      const attn = t.latestAttentionAt ?? 0;
+      const fresh = st.attn !== attn || st.upd !== t.updatedAt;
+      const title = titleOf(t);
+      try {
+        if (fresh && t.hasPendingInteraction) {
+          // 1. A permission request or question is waiting on you.
+          const pending = (await bb.sdk.threads.interactions.list({ threadId: t.id })) as unknown as Array<{ id: string; status: string; createdAt: number; payload: Record<string, any> }>;
+          for (const i of pending.filter((x) => x.status === "pending" && !st.ints.includes(x.id))) {
+            next.ints.push(i.id);
+            if (verdict({ forAt: i.createdAt, handledForAt: 0, cutoff, lastReadAt: t.lastReadAt, needsUnread: true }) !== "notify") continue;
+            const n = interactionNotice(t.id, title, i);
+            if (n) found.push({ n, threadId: t.id });
+          }
+          next.ints = next.ints.slice(-50);
+        } else if (fresh && isUnread(t) && !isWorking(statusOf(t))) {
+          // 2. The agent finished and its reply is waiting, unread.
+          const turn = await lastTurn(t.id);
+          if (turn) {
+            const v = verdict({ forAt: turn.forAt, handledForAt: st.forAt, cutoff, lastReadAt: t.lastReadAt, needsUnread: true });
+            // Read already: not handled, so a later recommendation can still notify.
+            if (v === "notify" || v === "old") next.forAt = turn.forAt;
+            if (v === "notify") {
+              const rec = await currentRec(t).catch(() => null);
+              const pills = rec?.forAt === turn.forAt ? null : await cachedPills(t.id, turn.forAt, turn.agent, turn.user).catch(() => null);
+              const c = replyChoices(turn.forAt, rec, pills);
+              found.push({ threadId: t.id, n: { threadId: t.id, kind: "reply", title, body: plainText(turn.agent) || "Replied", forAt: turn.forAt, ...c } });
+            }
+          }
+        }
+        // 3. A stale-thread recommendation for a message not yet notified. It
+        // shows in Needs you whether or not you've read the thread, so it
+        // notifies either way.
+        const rec = await currentRec(t).catch(() => null);
+        if (rec && rec.recommended >= 0 && verdict({ forAt: rec.forAt, handledForAt: next.forAt, cutoff, lastReadAt: t.lastReadAt, needsUnread: false }) === "notify") {
+          next.forAt = rec.forAt;
+          const turn = rec.stake ? null : await lastTurn(t.id).catch(() => null);
+          const body = rec.stake || (turn?.forAt === rec.forAt ? plainText(turn.agent) : "") || rec.reason || "Has a recommended reply";
+          found.push({ threadId: t.id, n: { threadId: t.id, kind: "reply", title, body: plainText(body), forAt: rec.forAt, ...replyChoices(rec.forAt, rec, null) } });
+        }
+      } catch (e) {
+        bb.log.warn(`notify check ${t.id}: ${e instanceof Error ? e.message : e}`);
+        continue; // looked at again next poll
+      }
+      next.attn = attn;
+      next.upd = t.updatedAt;
+      if (JSON.stringify(next) !== JSON.stringify(st)) nextState.set(t.id, next);
+    }
+    // Newest first under the rate limit; a thread whose notice has to wait
+    // keeps its old state, so the next poll finds it again.
+    found.sort((a, b) => b.n.forAt - a.n.forAt);
+    for (const f of found) {
+      if (!notifyLimit.take(Date.now())) { nextState.delete(f.threadId); continue; }
+      try { await deliver(f.n); } catch (e) { bb.log.warn(`notify ${f.threadId} ${f.n.kind}: ${e instanceof Error ? e.message : e}`); }
+    }
+    for (const [id, st] of nextState) await bb.storage.kv.set(`notif:${id}`, st);
+  }
+
+  bb.background.service("notify", {
+    async start(signal) {
+      const sleep = (ms: number) => new Promise<void>((resolve) => {
+        const done = () => { signal.removeEventListener("abort", onAbort); resolve(); };
+        const onAbort = () => { clearTimeout(timer); done(); };
+        const timer = setTimeout(done, ms);
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+      enabledSince = null; // a restart doesn't replay what arrived while it was down
+      await sleep(5_000);
+      while (!signal.aborted) {
+        try { await notifyPoll(); } catch (e) { bb.log.warn(`notify poll: ${e instanceof Error ? e.message : e}`); }
+        await sleep(NOTIFY_POLL_MS);
+      }
+      closeSessions();
     },
   });
 
@@ -1545,24 +1780,7 @@ export default async function plugin(bb: BbPluginApi) {
         .map((i): z.infer<typeof interaction> => {
           const p = i.payload as Record<string, any>;
           if (p.kind === "approval") {
-            const s = p.subject ?? {};
-            let summary = "Approve this step?";
-            let detail: string | null = p.reason ?? null;
-            if (s.kind === "command") {
-              summary = "Run a command";
-              detail = s.command;
-            } else if (s.kind === "file_change") {
-              summary = "Change files";
-              detail = s.writeScope ?? detail;
-            } else if (s.kind === "permission_grant") {
-              summary = `Grant permissions${s.toolName ? ` to ${s.toolName}` : ""}`;
-            } else if (s.kind === "plan") {
-              summary = "Approve the plan";
-              detail = s.plan;
-            } else if (s.kind === "tool_use") {
-              summary = s.presentation?.title ?? s.presentation?.label?.pending ?? `Use ${s.tool}`;
-              detail = s.presentation?.detail ?? detail;
-            }
+            const { summary, detail } = describeApproval(p);
             return {
               kind: "approval",
               id: i.id,
@@ -2049,13 +2267,8 @@ export default async function plugin(bb: BbPluginApi) {
       // Only when the agent spoke last and is done.
       if (!last || last.role !== "assistant" || isWorking(statusOf(t as unknown as Dto)) || (t as any).hasPendingInteraction) return { forAt: 0, pills: [] };
       const forAt = typeof last.createdAt === "number" ? last.createdAt : 0;
-      const cached = await bb.storage.kv.get<{ forAt: number; pills: Array<{ label: string; text: string }> }>(`sug4:${threadId}`);
-      if (cached && cached.forAt === forAt) return cached;
       const prevUser = [...rows].reverse().find((r) => r.role === "user");
-      const pills = await suggestFor(last.text as string, prevUser ? (prevUser.text as string) : null);
-      const value = { forAt, pills };
-      await bb.storage.kv.set(`sug4:${threadId}`, value);
-      return value;
+      return cachedPills(threadId, forAt, last.text as string, prevUser ? (prevUser.text as string) : null);
     },
 
     async threadArtifacts({ threadId }) {
@@ -2073,6 +2286,30 @@ export default async function plugin(bb: BbPluginApi) {
     async artifactsSeen({ ids }) {
       await markSeen(ids);
       return { ok: true };
+    },
+
+    async registerDevice({ token, env, bundleId }) {
+      const list = await devices();
+      const now = Date.now();
+      const t = token.toLowerCase();
+      const prev = list.find((d) => d.token === t);
+      if (prev) Object.assign(prev, { env, bundleId, lastSeen: now });
+      else list.push({ token: t, env, bundleId, addedAt: now, lastSeen: now });
+      await bb.storage.kv.set("devices", list);
+      bb.log.info(`device ${prev ? "seen" : "registered"} …${t.slice(-6)} (${env}, ${list.length} total)`);
+      return { ok: true };
+    },
+
+    async testNotification(input) {
+      let id = input?.threadId ?? null;
+      if (!id) {
+        const list = (await bb.sdk.threads.list({ archived: false, limit: 300 })) as Dto[];
+        id = (await chooseManager(list, await managerIds().catch(() => new Set<string>()))).id ?? list[0]?.id ?? null;
+      }
+      if (!id) throw new Error("No thread to point the test notification at");
+      const n: Notice = { threadId: id, kind: "reply", title: "Pocket", body: "Test notification: notifications are working.", forAt: Date.now() };
+      const r = await deliver(n);
+      return { dryRun: r.dryRun, devices: r.results.length, results: r.results };
     },
   });
 
