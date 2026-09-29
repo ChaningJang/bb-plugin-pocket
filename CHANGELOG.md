@@ -3,6 +3,21 @@
 Changes to Pocket's pages and server. They reach you as soon as your bb reloads the plugin: no app install needed.
 Newest first.
 
+## 0.4.20
+- Walk keeps one transcript across a direct thread line and a reconnect, and names who's speaking: BB, or the
+  thread's title (tap to open it).
+- New Conversations screen (chat button next to Walk): every Walk, Hey BB, check-in and desk call from Talk to BB's
+  notebook, by day, with transcripts, actions as thread links, and notes.
+
+## 0.4.19
+- Drafts: a test screen tries different ways to open a Gmail draft on the phone (open a Gmail draft, then "Try links
+  that go straight to it"); tap **Use this one** on the link that lands on the draft and **Open Gmail** uses it from
+  then on. Desktop is unchanged.
+- Drafts: Gmail drafts you send or delete anywhere drop off within a minute, and opening one that's gone says so.
+- Drafts: Slack drafts drop off once sent, even if you edited them first; a newer draft to the same conversation
+  replaces the older one; they age out after 3 days. Slack can't tell Pocket about deletions, so **Hide** is now
+  **Remove**.
+
 ## 0.4.18
 - In the iPhone app, an Ambient button next to Walk starts Ambient Walk (music plus spoken check-ins); it shows
   ● Ambient while it's running.

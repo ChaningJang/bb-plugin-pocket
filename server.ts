@@ -54,6 +54,8 @@ const message = z.object({
 // thread's project on the server, so the page never names a server path.
 const upFile = z.object({ name: z.string().min(1).max(200), mime: z.string().max(100), data: z.string().min(1).max(34_000_000) });
 const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
+// Where page.html loads talk.js; GET /app puts the file inline there.
+export const TALK_TAG = '<script src="./talk.js"></script>';
 
 const choice = z.object({ label: z.string(), value: z.string(), description: z.string().nullable() });
 
@@ -99,6 +101,10 @@ const artifact = z.object({
 
 const threadId = z.string().regex(/^thr_[a-z0-9]+$/);
 const ok = z.object({ ok: z.boolean() });
+// How the phone opens a Gmail draft: "app" just opens the Gmail app (the only
+// link known to work); the rest are candidates tried on #/draft-links. None of
+// them composes, so none can duplicate or send a draft.
+const GMAIL_LINKS = ["app", "cv0", "cv1", "cvMail", "tlDrafts", "mweb"] as const;
 
 export const rpcContract = defineRpcContract({
   home: {
@@ -210,7 +216,7 @@ export const rpcContract = defineRpcContract({
     output: z.object({
       enabled: z.boolean(),
       gmail: z.array(z.object({
-        id: z.string(), hexId: z.string(), to: z.string(), subject: z.string(), snippet: z.string(),
+        id: z.string(), hexId: z.string(), threadId: z.string(), to: z.string(), subject: z.string(), snippet: z.string(),
         at: z.number(), agent: z.boolean(), older: z.number(),
       })),
       slack: z.array(z.object({
@@ -218,6 +224,10 @@ export const rpcContract = defineRpcContract({
       })),
       teamId: z.string().nullable(),
       gmailError: z.string().nullable(),
+      // Which link the phone uses for a Gmail draft (picked on #/draft-links), and the
+      // signed-in address for the links that name the account.
+      gmailLink: z.enum(GMAIL_LINKS),
+      account: z.string().nullable(),
     }),
   },
   draftBody: {
@@ -225,6 +235,7 @@ export const rpcContract = defineRpcContract({
     output: z.object({ to: z.string(), cc: z.string(), subject: z.string(), body: z.string() }),
   },
   dismissDraft: { input: z.object({ key: z.string().max(100) }), output: ok },
+  setGmailLink: { input: z.object({ style: z.enum(GMAIL_LINKS) }), output: ok },
   // Quick replies: tappable suggestions under the agent's latest message.
   // Which pills you actually tap: the one-week test of "more opinionated when stale".
   // Long swipe left in Needs you: mark read and keep it out of Needs you (and
@@ -978,6 +989,9 @@ export default async function plugin(bb: BbPluginApi) {
       ["gmail", "users", "drafts", "list", "--params", JSON.stringify({ userId: "me", maxResults: 60 })],
     );
     const items = list.drafts ?? [];
+    // A draft sent or deleted anywhere is simply missing from the list.
+    const live = new Set(items.map((d) => d.message.id));
+    for (const k of draftMeta.keys()) if (!live.has(k)) draftMeta.delete(k);
     const queue = items.filter((d) => !draftMeta.has(d.message.id));
     const worker = async () => {
       for (let d = queue.shift(); d; d = queue.shift()) {
@@ -1013,6 +1027,16 @@ export default async function plugin(bb: BbPluginApi) {
       .sort((a, b) => b.at - a.at);
   }
 
+  // The address Gmail is signed in as, for links that name the account.
+  let gmailAccount: string | null = null;
+  async function gmailAddress() {
+    if (!gmailAccount) {
+      try { gmailAccount = (await gws<{ emailAddress?: string }>(["gmail", "users", "getProfile", "--params", JSON.stringify({ userId: "me" })])).emailAddress ?? null; }
+      catch { /* links that need it are just left out */ }
+    }
+    return gmailAccount;
+  }
+
   let slackAuth: { token: string; team: string | null; user: string | null } | null = null;
   async function slack(): Promise<typeof slackAuth> {
     if (slackAuth) return slackAuth;
@@ -1030,21 +1054,40 @@ export default async function plugin(bb: BbPluginApi) {
 
   const norm = (s: string) => s.toLowerCase().replace(/<[^>]*>/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
-  // Slack drafts can't be listed with a user token, so your tools log each one they
-  // file. A draft counts as sent once a message from you with the same
-  // opening appears in that conversation after the draft was made.
+  // Did this message of yours send the draft? Its opening matches, or you edited
+  // it first and kept a good share of its words.
+  const words = (s: string) => new Set(norm(s).split(" ").filter((w) => w.length >= 4));
+  function sendsDraft(draft: string, message: string) {
+    const opening = norm(draft).slice(0, 40);
+    if (opening && norm(message).startsWith(opening)) return true;
+    const dw = words(draft), mw = words(message);
+    const shared = [...dw].filter((w) => mw.has(w)).length;
+    return shared >= 2 && shared / dw.size >= 0.25;
+  }
+
+  // Slack drafts can't be listed or looked up with a user token (drafts.list and
+  // drafts.info answer not_allowed_token_type), so your tools log each one they
+  // file, and a draft deleted in Slack can't be seen from here. What Pocket can
+  // know: a draft is gone once you send it (edited or not), a newer draft to the
+  // same conversation replaces it (Slack keeps one per conversation), you can
+  // remove one yourself, and after a few days it ages out.
+  const SLACK_DRAFT_DAYS = 3;
   async function slackDrafts() {
     let text: string;
     const { slackDraftsLog } = await settings.get();
     if (!slackDraftsLog) return [];
     try { text = await readFile(expandHome(slackDraftsLog), "utf8"); } catch { return []; }
-    const since = Date.now() / 1000 - 7 * 86400;
+    const since = Date.now() / 1000 - SLACK_DRAFT_DAYS * 86400;
     const rows = text.trim().split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } })
       .filter((r) => r.ts >= since && r.channel && r.text) as Array<{ ts: number; draft_id: string | null; channel: string; target: string; thread: string | null; text: string }>;
     const sentKeys = new Set((await bb.storage.kv.get<string[]>("slackSent")) ?? []);
     const auth = await slack();
     const out = [];
-    for (const r of rows.reverse()) {
+    const slots = new Set<string>();
+    for (const r of rows.sort((a, b) => b.ts - a.ts)) {
+      const slot = `${r.channel}:${r.thread ?? ""}`;
+      if (slots.has(slot)) continue; // replaced by a newer draft here
+      slots.add(slot);
       const key = r.draft_id ?? `${r.channel}:${r.ts}`;
       if (sentKeys.has(key)) continue;
       let sent = false;
@@ -1053,9 +1096,9 @@ export default async function plugin(bb: BbPluginApi) {
           const url = r.thread
             ? `https://slack.com/api/conversations.replies?channel=${r.channel}&ts=${r.thread}&oldest=${Math.floor(r.ts) - 1}&limit=100`
             : `https://slack.com/api/conversations.history?channel=${r.channel}&oldest=${Math.floor(r.ts) - 1}&limit=100`;
-          const h = (await (await fetch(url, { headers: { authorization: `Bearer ${auth.token}` } })).json()) as { messages?: Array<{ user?: string; text?: string }> };
-          const opening = norm(r.text).slice(0, 40);
-          sent = (h.messages ?? []).some((m) => m.user === auth.user && opening.length > 0 && norm(m.text ?? "").startsWith(opening.slice(0, Math.min(40, opening.length))));
+          const h = (await (await fetch(url, { headers: { authorization: `Bearer ${auth.token}` } })).json()) as { messages?: Array<{ user?: string; text?: string; ts?: string }> };
+          // Replies always include the thread's first message, even from before the draft.
+          sent = (h.messages ?? []).some((m) => m.user === auth.user && Number(m.ts) >= r.ts - 1 && sendsDraft(r.text, m.text ?? ""));
         } catch { /* unknown: keep showing it */ }
       }
       if (sent) { sentKeys.add(key); continue; }
@@ -1071,18 +1114,22 @@ export default async function plugin(bb: BbPluginApi) {
     const dismissed = new Set((await bb.storage.kv.get<string[]>("draftsDismissed")) ?? []);
     let gmail: Array<GmailDraft & { older: number }> = [];
     let gmailError: string | null = null;
+    let account: string | null = null;
     if (useGmail) {
       await refreshGwsCfg();
-      try { gmail = await gmailDrafts(); } catch (e) { gmailError = e instanceof Error ? e.message : String(e); }
+      try { gmail = await gmailDrafts(); account = await gmailAddress(); } catch (e) { gmailError = e instanceof Error ? e.message : String(e); }
     }
     const slackItems = await slackDrafts();
     const auth = await slack();
+    const style = await bb.storage.kv.get<string>("gmailLink");
     return {
       enabled,
-      gmail: gmail.filter((d) => !dismissed.has(d.hexId)).map(({ threadId: _t, ...d }) => d),
+      gmail: gmail.filter((d) => !dismissed.has(d.hexId)),
       slack: slackItems.filter((d) => !dismissed.has(d.key)),
       teamId: auth?.team ?? null,
       gmailError,
+      gmailLink: (GMAIL_LINKS as readonly string[]).includes(style ?? "") ? style as typeof GMAIL_LINKS[number] : "app",
+      account,
     };
   }
 
@@ -2118,6 +2165,13 @@ export default async function plugin(bb: BbPluginApi) {
       return { ok: true };
     },
 
+    async setGmailLink({ style }) {
+      await bb.storage.kv.set("gmailLink", style);
+      bb.log.info(`drafts: phone Gmail link set to ${style}`);
+      if (draftsCache) draftsCache.at = 0;
+      return { ok: true };
+    },
+
     async dismiss({ threadId, undo, wasUnread }) {
       if (undo) {
         await bb.storage.kv.delete(`dismissed:${threadId}`);
@@ -2401,7 +2455,10 @@ export default async function plugin(bb: BbPluginApi) {
 
   // ---- HTTP ---------------------------------------------------------------
   bb.http.route("GET", "/app", async () => {
-    const html = (await asset("page.html")).toString("utf8");
+    // talk.js (the Walk transcript and Conversations helpers, shared with the
+    // tests) goes inline, so the page never runs without it.
+    const talk = (await asset("talk.js")).toString("utf8");
+    const html = (await asset("page.html")).toString("utf8").replace(TALK_TAG, () => `<script>\n${talk}</script>`);
     return new Response(html, {
       headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
     });
